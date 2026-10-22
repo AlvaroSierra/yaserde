@@ -601,7 +601,7 @@ fn build_call_visitor(
         }
       }).map_err(|e| ::std::format!("{}: {}", #label_name, e))?;
 
-      #value_label#action
+      #value_label #action
     }
   })
 }

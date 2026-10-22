@@ -3,81 +3,91 @@
 //! YaSerDe is a framework for ***ser***ializing and ***de***serializing Rust data
 //! structures efficiently and generically from and into XML.
 //!
-//! YaSerDe makes it easy to serialize XML documents given an properly annotated struct.
-//! Please refer to the `examples` directory for the complete code shown below.
+//! Enable the `derive` feature to derive [`YaSerialize`] and [`YaDeserialize`]:
 //!
-//! # Serialize
+//! ```toml
+//! [dependencies]
+//! yaserde = { version = "0.12", features = ["derive"] }
+//! ```
 //!
-//! For instance, let's say that one wants to generate a XML file for the
+//! # Serialize and deserialize
+//!
+//! For instance, let's say that one wants to generate an XML file for the
 //! [Rust-Embedded community](https://github.com/rust-embedded/). A well known XML
 //! file for microcontrollers is called [SVD](https://github.com/rust-embedded/svd/)
-//! and it can be defined on YaSerDe via structs like so:
+//! and part of it can be described with YaSerDe like so:
 //!
-//!```rust
-//! use yaserde_derive::YaSerialize;
+//! ```rust
+//! # #[cfg(feature = "derive")] {
+//! use yaserde::{YaDeserialize, YaSerialize};
 //!
-//! #[derive(PartialEq, Debug, YaSerialize)]
+//! #[derive(Debug, PartialEq, YaSerialize, YaDeserialize)]
 //! #[yaserde(rename = "device")]
 //! struct Device {
 //!   #[yaserde(attribute = true)]
 //!   schemaversion: String,
-//!   #[yaserde(attribute = true)]
-//!   xmlns: String,
-//!   #[yaserde(attribute = true)]
-//!   xsnonamespaceschemalocation: String,
-//!   attributes: DeviceAttributes
-//! }
-//!
-//! #[derive(PartialEq, Debug, YaSerialize)]
-//! struct DeviceAttributes {
 //!   vendor: String,
+//!   name: String,
+//!   cpu: Cpu,
 //! }
-//!```
 //!
-//! The interspersed `#[yaserde()]` macros give some indication of what the resulting XML
-//! Will look like, namely, a short snippet of the struct above in XML would be depending on
-//! concrete values passed to the struct (not shown):
+//! #[derive(Debug, PartialEq, YaSerialize, YaDeserialize)]
+//! struct Cpu {
+//!   name: String,
+//!   revision: String,
+//! }
 //!
-//!```xml
-//! (...)
-//! <device schemaversion: "1.0-example", xmlns: "ns:.... example"
-//! xsnonamespaceschemalocation: "foo_bar_baz">
-//!    <devattributes>
-//!    </devattributes>
-//! (...)
-//!```
+//! let device = Device {
+//!   schemaversion: "1.3".to_string(),
+//!   vendor: "STMicroelectronics".to_string(),
+//!   name: "STM32F103".to_string(),
+//!   cpu: Cpu {
+//!     name: "CM3".to_string(),
+//!     revision: "r1p1".to_string(),
+//!   },
+//! };
 //!
-//! Notice the important difference in **XML output representation between `attributes` vs
-//! `child`**, since SVD expects information in that particular arrangement. YaSerDe allows that
-//! serialized XML to be valid unlike other Rust XML (de)serialization crates (i.e quick-xml).
+//! let xml = yaserde::ser::to_string(&device).unwrap();
+//! assert_eq!(
+//!   xml,
+//!   r#"<?xml version="1.0" encoding="UTF-8"?><device schemaversion="1.3"><vendor>STMicroelectronics</vendor><name>STM32F103</name><cpu><name>CM3</name><revision>r1p1</revision></cpu></device>"#
+//! );
 //!
-//! Also the last `DevAttrs` struct field is indeed another struct, so one can chain several
-//! structs to compose the XML structure (again, see examples folder for the complete
-//! example).
-//!
-//!
-//!```toml
-//! [dependencies]
-//! # serde = { version = "1.0.123", features = [ "derive" ] }
-//! # quick-xml = { version = "0.21.0", features = [ "serialize" ] }
-//! yaserde = "0.5.1"
-//! yaserde_derive = "0.5.1"
+//! let loaded: Device = yaserde::de::from_str(&xml).unwrap();
+//! assert_eq!(loaded, device);
+//! # }
 //! ```
 //!
-//! Last but not least, in order to have a nice, pretty printed XML output one can do:
+//! The `#[yaserde(...)]` attributes control the XML representation: `schemaversion` is written
+//! as an XML attribute of `<device>`, while the other fields are written as child elements.
+//! A field can itself be a struct (here `cpu`), so several structs can be composed to describe
+//! the whole XML document. See the `examples` directory for more complete examples.
 //!
-//! ```ignore
-//!     // Display pretty printed XML
-//!    let yaserde_cfg = yaserde::ser::Config{
-//!        perform_indent: true,
-//!        .. Default::default()
-//!    };
+//! # Pretty printing
 //!
-//!     println!("{}", yaserde::ser::to_string_with_config(&dev, &yaserde_cfg).ok().unwrap());
+//! To get an indented XML output, use [`ser::to_string_with_config`]:
+//!
+//! ```rust
+//! # #[cfg(feature = "derive")] {
+//! # use yaserde::YaSerialize;
+//! # #[derive(YaSerialize)]
+//! # #[yaserde(rename = "device")]
+//! # struct Device {
+//! #   name: String,
+//! # }
+//! # let device = Device { name: "STM32F103".to_string() };
+//! let config = yaserde::ser::Config {
+//!   perform_indent: true,
+//!   ..Default::default()
+//! };
+//!
+//! let xml = yaserde::ser::to_string_with_config(&device, &config).unwrap();
+//! assert_eq!(
+//!   xml,
+//!   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<device>\n  <name>STM32F103</name>\n</device>"
+//! );
+//! # }
 //! ```
-//!
-//! Avoid using either `{:?}` or `{:#?}` println! formatters since it'll garble the output of your
-//! XML.
 
 #[cfg(feature = "yaserde_derive")]
 #[allow(unused_imports)]

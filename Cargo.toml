@@ -1,6 +1,12 @@
 [workspace]
+resolver = "2"
 members = [
   "yaserde",
   "yaserde_derive",
   "examples",
 ]
+
+[workspace.package]
+edition = "2021"
+# Keep in sync with the MSRV job in .github/workflows/ci.yml
+rust-version = "1.75"
