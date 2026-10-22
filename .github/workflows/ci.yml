@@ -33,19 +33,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Install stable Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      # Resolve dependencies to versions compatible with `rust-version` from Cargo.toml
-      - name: Generate MSRV-compatible lockfile
-        env:
-          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
-        run: cargo +stable generate-lockfile
-      # Keep in sync with `rust-version` in Cargo.toml
+      # Keep in sync with `rust-version` in Cargo.toml.
+      # Resolver 3 picks dependency versions compatible with `rust-version`.
       - name: Install MSRV Rust toolchain
-        uses: dtolnay/rust-toolchain@1.75
+        uses: dtolnay/rust-toolchain@1.85
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo +1.75 test --all-features --workspace --locked
+        run: cargo test --all-features --workspace
 
   rustfmt:
     name: Rustfmt

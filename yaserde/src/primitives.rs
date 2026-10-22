@@ -43,7 +43,7 @@ pub fn deserialize_primitives<S, R: Read>(
     return Err("Start element not found".to_string());
   }
 
-  if let xml::reader::XmlEvent::Characters(ref text) = reader.peek()? {
+  if let xml::reader::XmlEvent::Characters(text) = reader.peek()? {
     deserialize_function(text)
   } else {
     deserialize_function("")

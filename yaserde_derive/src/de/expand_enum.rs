@@ -288,7 +288,7 @@ fn build_unnamed_visitor_calls(
       let set_vec = quote! {
         match enum_value {
           Some(ref mut v) => match v {
-            #variant_name(ref mut v) => v.push(value),
+            #variant_name(v) => v.push(value),
             _ => {
               return ::std::result::Result::Err(
                 ::std::string::String::from("Got sequence of different types"),

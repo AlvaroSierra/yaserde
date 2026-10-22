@@ -4,9 +4,9 @@ use proc_macro2::Span;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use std::fmt;
+use syn::Type::Path;
 use syn::ext::IdentExt;
 use syn::spanned::Spanned;
-use syn::Type::Path;
 
 #[derive(Debug)]
 pub struct YaSerdeField {
@@ -273,7 +273,7 @@ impl From<&syn::Field> for Field {
       ty = &g.elem;
     }
     match ty {
-      Path(ref path) => Field::from(&path.path),
+      Path(path) => Field::from(&path.path),
       _ => panic!("unable to match {:?}", field.ty),
     }
   }
@@ -283,11 +283,11 @@ impl From<&syn::PathSegment> for Field {
   fn from(path_segment: &syn::PathSegment) -> Self {
     if let syn::PathArguments::AngleBracketed(ref args) = path_segment.arguments {
       match args.args.first() {
-        Some(syn::GenericArgument::Type(Path(ref path))) => {
+        Some(syn::GenericArgument::Type(Path(path))) => {
           return Field::from(&path.path);
         }
         Some(syn::GenericArgument::Type(syn::Type::Group(syn::TypeGroup { elem, .. }))) => {
-          if let Path(ref group) = elem.as_ref() {
+          if let Path(group) = elem.as_ref() {
             return Field::from(&group.path);
           }
         }

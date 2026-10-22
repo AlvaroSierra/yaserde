@@ -36,7 +36,7 @@ pub fn validate(ast: &syn::DeriveInput) -> syn::Result<()> {
       return Err(syn::Error::new_spanned(
         &ast.ident,
         "YaSerDe does not support unions",
-      ))
+      ));
     }
   }
 

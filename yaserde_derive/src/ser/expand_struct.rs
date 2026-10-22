@@ -276,7 +276,7 @@ pub fn serialize(
 
               Some(quote! {
                 #conditions {
-                  if let ::std::option::Option::Some(ref yaserde_items) = &self.#label {
+                  if let ::std::option::Option::Some(yaserde_items) = &self.#label {
                     for yaserde_item in yaserde_items.iter() {
                       #inner
                     }
@@ -287,7 +287,7 @@ pub fn serialize(
               // For non-attribute Option<Vec<T>>, use standard serialization
               Some(quote! {
                 #conditions {
-                  if let ::std::option::Option::Some(ref items) = &self.#label {
+                  if let ::std::option::Option::Some(items) = &self.#label {
                     for item in items.iter() {
                       writer.set_start_event_name(::std::option::Option::Some(#label_name.to_string()));
                       writer.set_skip_start_end(false);
@@ -301,7 +301,7 @@ pub fn serialize(
           Field::FieldStruct { .. } => Some(if field.is_flatten() {
             quote! {
               #conditions {
-                if let ::std::option::Option::Some(ref item) = &self.#label {
+                if let ::std::option::Option::Some(item) = &self.#label {
                   writer.set_start_event_name(::std::option::Option::None);
                   writer.set_skip_start_end(true);
                   ::yaserde::YaSerialize::serialize(item, writer)?;
@@ -311,7 +311,7 @@ pub fn serialize(
           } else {
             quote! {
               #conditions {
-                if let ::std::option::Option::Some(ref item) = &self.#label {
+                if let ::std::option::Option::Some(item) = &self.#label {
                   writer.set_start_event_name(::std::option::Option::Some(#label_name.to_string()));
                   writer.set_skip_start_end(false);
                   ::yaserde::YaSerialize::serialize(item, writer)?;
@@ -437,7 +437,7 @@ pub fn serialize(
   )
 }
 
-/// Helper function to generate serialization code for Option<Vec<T>> attributes
+/// Helper function to generate serialization code for `Option<Vec<T>>` attributes
 fn ser_option_vec_attribute(
   field: &YaSerdeField,
   label: &Option<Ident>,

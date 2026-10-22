@@ -5,8 +5,8 @@ extern crate yaserde_derive;
 
 use log::debug;
 use std::io::Read;
-use yaserde::de::from_str;
 use yaserde::YaDeserialize;
+use yaserde::de::from_str;
 
 fn init() {
   let _ = env_logger::builder().is_test(true).try_init();
@@ -87,8 +87,7 @@ fn de_dash_param() {
     title: String,
   }
 
-  let content =
-    "<book><author-release>Antoine de Saint-Exupéry</author-release><title>Little prince</title></book>";
+  let content = "<book><author-release>Antoine de Saint-Exupéry</author-release><title>Little prince</title></book>";
   convert_and_validate!(
     content,
     Book,
@@ -98,8 +97,7 @@ fn de_dash_param() {
     }
   );
 
-  let content =
-    "<book><title>Little prince</title><author-release>Antoine de Saint-Exupéry</author-release></book>";
+  let content = "<book><title>Little prince</title><author-release>Antoine de Saint-Exupéry</author-release></book>";
   convert_and_validate!(
     content,
     Book,
