@@ -41,6 +41,60 @@ fn de_wrong_end_balise() {
   let loaded: Result<Book, String> = from_str(content);
   assert_eq!(
     loaded,
-    Err("Unexpected closing tag: book != author".to_owned())
+    Err("author: Expected end tag </author>, found start tag <title>".to_owned())
   );
+}
+
+#[test]
+fn de_invalid_value() {
+  init();
+
+  #[derive(YaDeserialize, PartialEq, Debug)]
+  #[yaserde(rename = "data")]
+  pub struct Data {
+    required: Option<u32>,
+  }
+
+  let loaded: Result<Data, String> = from_str("<data><required>abc</required></data>");
+  assert_eq!(
+    loaded,
+    Err("required: invalid digit found in string".to_owned())
+  );
+}
+
+#[test]
+fn de_invalid_text_content() {
+  init();
+
+  #[derive(YaDeserialize, PartialEq, Debug)]
+  #[yaserde(rename = "data")]
+  pub struct Data {
+    #[yaserde(text = true)]
+    value: u32,
+  }
+
+  let loaded: Result<Data, String> = from_str("<data>abc</data>");
+  assert_eq!(loaded, Err("invalid digit found in string".to_owned()));
+}
+
+#[test]
+fn de_invalid_enum_value() {
+  init();
+
+  #[derive(YaDeserialize, PartialEq, Debug, Default)]
+  #[yaserde(rename = "data")]
+  pub enum Data {
+    #[default]
+    Empty,
+    Value(u32),
+  }
+
+  #[derive(YaDeserialize, PartialEq, Debug)]
+  #[yaserde(rename = "base")]
+  pub struct Base {
+    data: Data,
+  }
+
+  let loaded: Result<Base, String> = from_str("<base><data><Value>abc</Value></data></base>");
+  assert_eq!(loaded, Err("invalid digit found in string".to_owned()));
 }

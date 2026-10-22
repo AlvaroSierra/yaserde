@@ -87,14 +87,19 @@ pub fn serialize(
               | Field::FieldI64
               | Field::FieldU64
               | Field::FieldF32
-              | Field::FieldF64 => {
-                ser_option_vec_attribute(&field, &label, &label_name, quote!(item.to_string()))
-              }
+              | Field::FieldF64 => ser_option_vec_attribute(
+                &field,
+                &label,
+                &label_name,
+                quote!(::std::result::Result::<_, ::std::string::String>::Ok(
+                  item.to_string()
+                )),
+              ),
               Field::FieldStruct { .. } => ser_option_vec_attribute(
                 &field,
                 &label,
                 &label_name,
-                quote!(::yaserde::ser::to_string_content(item).unwrap_or_default()),
+                quote!(::yaserde::ser::to_string_attribute_value(item)),
               ),
               _ => {
                 unimplemented!("Complex data types in Option<Vec<T>> attributes not yet supported")
@@ -106,7 +111,7 @@ pub fn serialize(
                 .as_ref()
                 .map_or_else(
                   || ::std::result::Result::Ok(::std::string::String::new()),
-                  |v| ::yaserde::ser::to_string_content(v),
+                  |v| ::yaserde::ser::to_string_attribute_value(v),
                 )?
               }),
               quote!({
@@ -120,7 +125,7 @@ pub fn serialize(
             Field::FieldOption { .. } => unimplemented!(),
           },
           Field::FieldStruct { .. } => field.ser_wrap_default_attribute(
-            Some(quote! { ::yaserde::ser::to_string_content(&self.#label)? }),
+            Some(quote! { ::yaserde::ser::to_string_attribute_value(&self.#label)? }),
             quote!({
               struct_start_event.attr(#label_name, &yaserde_inner)
             }),
@@ -156,7 +161,7 @@ pub fn serialize(
               Some(quote! {
                 self.#label
                   .iter()
-                  .map(|item| ::yaserde::ser::to_string_content(item))
+                  .map(|item| ::yaserde::ser::to_string_attribute_value(item))
                   .collect::<::std::result::Result<::std::vec::Vec<_>, _>>()?
                   .join(" ")
               }),
@@ -198,8 +203,13 @@ pub fn serialize(
             let data_event = ::yaserde::__xml::writer::XmlEvent::characters(s);
             writer.write(data_event).map_err(|e| e.to_string())?;
           )),
-          _ => Some(quote!(
+          Field::FieldString => Some(quote!(
             let data_event = ::yaserde::__xml::writer::XmlEvent::characters(&self.#label);
+            writer.write(data_event).map_err(|e| e.to_string())?;
+          )),
+          _ => Some(quote!(
+            let yaserde_value = self.#label.to_string();
+            let data_event = ::yaserde::__xml::writer::XmlEvent::characters(&yaserde_value);
             writer.write(data_event).map_err(|e| e.to_string())?;
           )),
         };
@@ -435,18 +445,14 @@ fn ser_option_vec_attribute(
   item_serializer: TokenStream,
 ) -> TokenStream {
   let yaserde_inner_expr = quote! {
-    self.#label
-      .as_ref()
-      .map_or_else(
-        || ::std::string::String::new(),
-        |yaserde_list| {
-          yaserde_list
-            .iter()
-            .map(|item| #item_serializer)
-            .collect::<::std::vec::Vec<_>>()
-            .join(" ")
-        }
-      )
+    match self.#label.as_ref() {
+      ::std::option::Option::Some(yaserde_list) => yaserde_list
+        .iter()
+        .map(|item| #item_serializer)
+        .collect::<::std::result::Result<::std::vec::Vec<_>, ::std::string::String>>()?
+        .join(" "),
+      ::std::option::Option::None => ::std::string::String::new(),
+    }
   };
 
   let attribute_expr = quote!({

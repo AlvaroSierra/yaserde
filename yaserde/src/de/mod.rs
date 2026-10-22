@@ -107,27 +107,33 @@ impl<R: Read> Deserializer<R> {
     &mut self,
     f: F,
   ) -> Result<T, String> {
-    if let Ok(XmlEvent::StartElement { name, .. }) = self.next_event() {
-      let result = f(self)?;
-      self.expect_end_element(&name)?;
-      Ok(result)
-    } else {
-      Err("Internal error: Bad Event".to_string())
+    match self.next_event()? {
+      XmlEvent::StartElement { name, .. } => {
+        let result = f(self)?;
+        self.expect_end_element(&name)?;
+        Ok(result)
+      }
+      event => Err(format!(
+        "Internal error: expected start element, found {event:?}"
+      )),
     }
   }
 
   pub fn expect_end_element(&mut self, start_name: &OwnedName) -> Result<(), String> {
-    if let XmlEvent::EndElement { name, .. } = self.next_event()? {
-      if name == *start_name {
-        Ok(())
-      } else {
-        Err(format!(
-          "End tag </{}> didn't match the start tag <{}>",
-          name.local_name, start_name.local_name
-        ))
-      }
-    } else {
-      Err(format!("Unexpected token </{}>", start_name.local_name))
+    match self.next_event()? {
+      XmlEvent::EndElement { name, .. } if name == *start_name => Ok(()),
+      XmlEvent::EndElement { name, .. } => Err(format!(
+        "End tag </{}> didn't match the start tag <{}>",
+        name.local_name, start_name.local_name
+      )),
+      XmlEvent::StartElement { name, .. } => Err(format!(
+        "Expected end tag </{}>, found start tag <{}>",
+        start_name.local_name, name.local_name
+      )),
+      event => Err(format!(
+        "Expected end tag </{}>, found {:?}",
+        start_name.local_name, event
+      )),
     }
   }
 }

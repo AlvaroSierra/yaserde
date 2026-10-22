@@ -1,10 +1,9 @@
 use proc_macro2::{Ident, TokenStream};
-use quote::{quote, ToTokens};
+use quote::quote;
 use serde::Deserialize;
 use serde_tokenstream::from_tokenstream;
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
-use syn::{Attribute, Meta};
+use syn::Attribute;
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 pub struct YaSerdeAttribute {
@@ -45,48 +44,89 @@ pub struct YaSerdeAttribute {
   pub cdata: bool,
 }
 
-impl TryFrom<&Attribute> for YaSerdeAttribute {
-  type Error = String;
-
-  fn try_from(attr: &Attribute) -> Result<Self, Self::Error> {
-    if attr.path().is_ident("yaserde") {
-      let attributes = match &attr.meta {
-        Meta::Path(_) => {
-          unreachable!()
-        }
-        Meta::List(list) => {
-          let mut tokens = TokenStream::new();
-          list.tokens.to_tokens(&mut tokens);
-
-          match from_tokenstream::<YaSerdeAttribute>(&tokens) {
-            Ok(attribute) => attribute,
-            Err(error) => {
-              panic!("YaSerDe derive error: {}", error);
-            }
-          }
-        }
-        Meta::NameValue(_) => {
-          unreachable!()
-        }
-      };
-
-      Ok(attributes)
-    } else {
-      Err("not an attribute".to_string())
-    }
-  }
-}
-
 impl From<&Vec<Attribute>> for YaSerdeAttribute {
+  /// Attributes are checked with `YaSerdeAttribute::parse` before expansion (see `validate`),
+  /// so parsing cannot fail here.
   fn from(attributes: &Vec<Attribute>) -> Self {
-    attributes
-      .iter()
-      .find_map(|attribute| YaSerdeAttribute::try_from(attribute).ok())
-      .unwrap_or_default()
+    YaSerdeAttribute::parse(attributes).unwrap_or_else(|error| panic!("{}", error))
   }
 }
 
 impl YaSerdeAttribute {
+  /// Parse and merge all `#[yaserde(...)]` attributes of an item.
+  pub fn parse(attributes: &[Attribute]) -> syn::Result<Self> {
+    let mut result = YaSerdeAttribute::default();
+
+    for attr in attributes
+      .iter()
+      .filter(|attr| attr.path().is_ident("yaserde"))
+    {
+      let list = attr.meta.require_list()?;
+      let parsed = from_tokenstream::<YaSerdeAttribute>(&list.tokens)?;
+      result.merge(parsed).map_err(|key| {
+        syn::Error::new_spanned(attr, format!("duplicate yaserde attribute `{}`", key))
+      })?;
+    }
+
+    Ok(result)
+  }
+
+  /// Merge `other` into `self`, returning the name of the first option set in both.
+  fn merge(&mut self, other: Self) -> Result<(), String> {
+    fn merge_bool(target: &mut bool, value: bool, key: &str) -> Result<(), String> {
+      if *target && value {
+        return Err(key.to_string());
+      }
+      *target |= value;
+      Ok(())
+    }
+
+    fn merge_option(
+      target: &mut Option<String>,
+      value: Option<String>,
+      key: &str,
+    ) -> Result<(), String> {
+      if target.is_some() && value.is_some() {
+        return Err(key.to_string());
+      }
+      if value.is_some() {
+        *target = value;
+      }
+      Ok(())
+    }
+
+    merge_bool(&mut self.attribute, other.attribute, "attribute")?;
+    merge_option(&mut self.default, other.default, "default")?;
+    merge_option(
+      &mut self.default_namespace,
+      other.default_namespace,
+      "default_namespace",
+    )?;
+    merge_bool(&mut self.flatten, other.flatten, "flatten")?;
+    for (prefix, namespace) in other.namespaces {
+      if self.namespaces.contains_key(&prefix) {
+        return Err(format!("namespaces.{}", prefix));
+      }
+      self.namespaces.insert(prefix, namespace);
+    }
+    merge_option(&mut self.prefix, other.prefix, "prefix")?;
+    merge_option(&mut self.rename, other.rename, "rename")?;
+    merge_option(&mut self.tag, other.tag, "tag")?;
+    merge_bool(
+      &mut self.skip_serializing,
+      other.skip_serializing,
+      "skip_serializing",
+    )?;
+    merge_option(
+      &mut self.skip_serializing_if,
+      other.skip_serializing_if,
+      "skip_serializing_if",
+    )?;
+    merge_bool(&mut self.text, other.text, "text")?;
+    merge_bool(&mut self.cdata, other.cdata, "cdata")?;
+    Ok(())
+  }
+
   pub fn xml_element_name(&self, ident: &Ident) -> String {
     self.rename.clone().unwrap_or_else(|| ident.to_string())
   }

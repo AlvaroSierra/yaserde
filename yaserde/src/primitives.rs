@@ -37,13 +37,13 @@ pub fn deserialize_primitives<S, R: Read>(
   reader: &mut de::Deserializer<R>,
   deserialize_function: impl FnOnce(&str) -> Result<S, String>,
 ) -> Result<S, String> {
-  if let Ok(xml::reader::XmlEvent::StartElement { .. }) = reader.peek() {
+  if let xml::reader::XmlEvent::StartElement { .. } = reader.peek()? {
     reader.next_event()?;
   } else {
     return Err("Start element not found".to_string());
   }
 
-  if let Ok(xml::reader::XmlEvent::Characters(ref text)) = reader.peek() {
+  if let xml::reader::XmlEvent::Characters(ref text) = reader.peek()? {
     deserialize_function(text)
   } else {
     deserialize_function("")

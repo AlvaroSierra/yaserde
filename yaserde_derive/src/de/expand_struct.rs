@@ -7,7 +7,6 @@ use syn::{DataStruct, Generics, Ident};
 pub fn parse(
   data_struct: &DataStruct,
   name: &Ident,
-  root_namespace: &str,
   root: &str,
   root_attributes: &YaSerdeAttribute,
   generics: &Generics,
@@ -98,7 +97,13 @@ pub fn parse(
               self,
               v: &str,
             ) -> ::std::result::Result<Self::Value, ::std::string::String> {
-              let content = format!("{}{}{}", #xml_opening, v, #xml_closing);
+              // `v` is already unescaped by the XML reader, escape it again before re-parsing
+              let content = format!(
+                "{}{}{}",
+                #xml_opening,
+                ::yaserde::__xml::escape::escape_str_pcdata(v),
+                #xml_closing,
+              );
               ::yaserde::de::from_str(&content)
             }
           }
@@ -172,10 +177,6 @@ pub fn parse(
       let visit_struct = |struct_name: syn::Path, action: TokenStream| {
         Some(quote! {
           (#namespace, #label_name) => {
-            if depth == 0 {
-              // Don't count current struct's StartElement as substruct's StartElement
-              let _root = reader.next_event();
-            }
             if let Ok(::yaserde::__xml::reader::XmlEvent::StartElement { .. }) = reader.peek() {
               // If substruct's start element found then deserialize substruct
               let value = <#struct_name as ::yaserde::YaDeserialize>::deserialize(reader)?;
@@ -417,7 +418,9 @@ pub fn parse(
         Field::FieldStruct { .. } | Field::FieldVec { .. } => None,
         simple_type => {
           let type_token = TokenStream::from(simple_type);
-          set_text(&quote! { #type_token::from_str(text_content).unwrap() })
+          set_text(&quote! {
+            ::std::option::Option::Some(#type_token::from_str(text_content).map_err(|e| e.to_string())?)
+          })
         }
       }
     })
@@ -499,9 +502,10 @@ pub fn parse(
           match event {
             ::yaserde::__xml::reader::XmlEvent::StartElement{ref name, ref attributes, ..} => {
               let namespace = name.namespace.clone().unwrap_or_default();
-              if depth == 0 && name.local_name == #root && namespace.as_str() == #root_namespace {
+              if depth == 0 && !#flatten {
                 // Consume root element. We must do this first. In the case it shares a name with a child element, we don't
-                // want to prematurely match the child element below.
+                // want to prematurely match the child element below. The root element may be renamed by the parent
+                // field, so it is not compared with the struct's own name. A flattened struct has no root element.
                 let event = reader.next_event()?;
                 #write_unused
               } else {
@@ -584,19 +588,20 @@ fn build_call_visitor(
 
       #namespaces_matching
 
-      let result = reader.read_inner_value::<#field_type, _>(|reader| {
-        if let ::std::result::Result::Ok(::yaserde::__xml::reader::XmlEvent::Characters(s)) = reader.peek() {
-          let val = visitor.#visitor(&s);
-          let _event = reader.next_event()?;
-          val
-        } else {
-          ::std::result::Result::Err(::std::format!("unable to parse content for {}", #label_name))
+      let value = reader.read_inner_value::<#field_type, _>(|reader| {
+        match reader.peek()? {
+          ::yaserde::__xml::reader::XmlEvent::Characters(s) => {
+            let val = visitor.#visitor(&s);
+            let _event = reader.next_event()?;
+            val
+          }
+          // Empty element, e.g. `<field></field>` or `<field/>`
+          ::yaserde::__xml::reader::XmlEvent::EndElement { .. } => visitor.#visitor(""),
+          _ => ::std::result::Result::Err(::std::format!("unable to parse content for {}", #label_name)),
         }
-      });
+      }).map_err(|e| ::std::format!("{}: {}", #label_name, e))?;
 
-      if let ::std::result::Result::Ok(value) = result {
-        #value_label#action
-      }
+      #value_label#action
     }
   })
 }

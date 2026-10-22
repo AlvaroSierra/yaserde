@@ -30,7 +30,7 @@ pub fn expand_derive_serialize(ast: &syn::DeriveInput) -> Result<TokenStream, St
     syn::Data::Enum(ref data_enum) => {
       expand_enum::serialize(data_enum, name, &root_name, &root_attributes, generics)
     }
-    syn::Data::Union(ref _data_union) => unimplemented!(),
+    syn::Data::Union(ref _data_union) => return Err("YaSerDe does not support unions".into()),
   };
 
   Ok(quote! {

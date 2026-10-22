@@ -187,7 +187,7 @@ fn build_unnamed_field_visitors(fields: &syn::FieldsUnnamed) -> TokenStream {
         make_visitor(
           &visitor,
           &field_type,
-          &quote! { ::std::result::Result::Ok(#field_type::from_str(v).unwrap()) },
+          &quote! { #field_type::from_str(v).map_err(|e| e.to_string()) },
         )
       };
 
@@ -203,7 +203,13 @@ fn build_unnamed_field_visitors(fields: &syn::FieldsUnnamed) -> TokenStream {
             &Ident::new("visit_str", Span::call_site()),
             &quote! { #struct_name },
             &quote! {
-              let content = "<".to_string() + #struct_id + ">" + v + "</" + #struct_id + ">";
+              let content = "<".to_string()
+                + #struct_id
+                + ">"
+                + &::yaserde::__xml::escape::escape_str_pcdata(v)
+                + "</"
+                + #struct_id
+                + ">";
               let value: ::std::result::Result<#struct_name, ::std::string::String> =
                 ::yaserde::de::from_str(&content);
               value
@@ -241,25 +247,21 @@ fn build_unnamed_visitor_calls(
         Some(quote! {
           let visitor = #visitor_label{};
 
-          let result = reader.read_inner_value::<#field_type, _>(|reader| {
+          let value = reader.read_inner_value::<#field_type, _>(|reader| {
             if let ::yaserde::__xml::reader::XmlEvent::EndElement { .. } = *reader.peek()? {
               return visitor.#visitor("");
             }
 
-            if let ::std::result::Result::Ok(::yaserde::__xml::reader::XmlEvent::Characters(s))
-              = reader.next_event()
-            {
+            if let ::yaserde::__xml::reader::XmlEvent::Characters(s) = reader.next_event()? {
               visitor.#visitor(&s)
             } else {
               ::std::result::Result::Err(
                 ::std::format!("unable to parse content for {}", #label_name),
               )
             }
-          });
+          })?;
 
-          if let ::std::result::Result::Ok(value) = result {
-            #action
-          }
+          #action
         })
       };
 

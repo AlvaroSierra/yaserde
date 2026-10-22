@@ -17,20 +17,24 @@ use quote::quote;
 pub fn derive_deserialize(input: TokenStream) -> TokenStream {
   let ast = syn::parse_macro_input!(input as syn::DeriveInput);
 
-  match de::expand_derive_deserialize(&ast) {
-    Ok(expanded) => expanded.into(),
-    Err(msg) => panic!("{}", msg),
-  }
+  common::validate(&ast)
+    .and_then(|()| {
+      de::expand_derive_deserialize(&ast).map_err(|msg| syn::Error::new_spanned(&ast.ident, msg))
+    })
+    .unwrap_or_else(syn::Error::into_compile_error)
+    .into()
 }
 
 #[proc_macro_derive(YaSerialize, attributes(yaserde))]
 pub fn derive_serialize(input: TokenStream) -> TokenStream {
   let ast = syn::parse_macro_input!(input as syn::DeriveInput);
 
-  match ser::expand_derive_serialize(&ast) {
-    Ok(expanded) => expanded.into(),
-    Err(msg) => panic!("{}", msg),
-  }
+  common::validate(&ast)
+    .and_then(|()| {
+      ser::expand_derive_serialize(&ast).map_err(|msg| syn::Error::new_spanned(&ast.ident, msg))
+    })
+    .unwrap_or_else(syn::Error::into_compile_error)
+    .into()
 }
 
 // Serialize & Deserialize a struct using its UpperHex implementation

@@ -54,6 +54,19 @@ pub fn serialize_with_writer_content<W: Write, T: YaSerialize>(
   }
 }
 
+/// Serialize a value as raw, unescaped text to be used as an attribute value.
+/// The XML writer escapes attribute values itself, so escaping here would escape twice.
+#[doc(hidden)]
+pub fn to_string_attribute_value<T: YaSerialize>(model: &T) -> Result<String, String> {
+  let mut config = EmitterConfig::new().write_document_declaration(false);
+  config.perform_escaping = false;
+
+  let mut serializer = Serializer::new(EventWriter::new_with_config(Vec::new(), config));
+  serializer.set_skip_start_end(true);
+  YaSerialize::serialize(model, &mut serializer)?;
+  String::from_utf8(serializer.into_inner()).map_err(|e| e.to_string())
+}
+
 pub struct Serializer<W: Write> {
   writer: EventWriter<W>,
   skip_start_end: bool,
