@@ -9,7 +9,7 @@ pub fn parse(
   root: &str,
   root_attributes: &YaSerdeAttribute,
   generics: &Generics,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
   let namespaces_matching = root_attributes.get_namespace_matching(
     &None,
     quote!(enum_namespace),
@@ -20,8 +20,8 @@ pub fn parse(
   let match_to_enum: TokenStream = data_enum
     .variants
     .iter()
-    .filter_map(|variant| parse_variant(variant, name))
-    .collect();
+    .map(|variant| parse_variant(variant, name))
+    .collect::<syn::Result<_>>()?;
 
   let flatten = root_attributes.flatten;
   let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -31,7 +31,7 @@ pub fn parse(
       attributes
         .iter()
         .find(|attr| attr.name.local_name.as_str() == #tag)
-        .ok_or(format!("Expected enum tagged with {}, found {:?}", #tag, event))?
+        .ok_or_else(|| ::yaserde::Error::custom(format!("Expected enum tagged with {}, found {:?}", #tag, event)))?
         .value.as_str()
     }
   } else {
@@ -40,12 +40,12 @@ pub fn parse(
     }
   };
 
-  quote! {
+  Ok(quote! {
     impl #impl_generics ::yaserde::YaDeserialize for #name #ty_generics #where_clause {
       #[allow(unused_variables)]
       fn deserialize<R: ::std::io::Read>(
         reader: &mut ::yaserde::de::Deserializer<R>,
-      ) -> ::std::result::Result<Self, ::std::string::String> {
+      ) -> ::std::result::Result<Self, ::yaserde::Error> {
         let (named_element, enum_namespace) =
           if let ::yaserde::__xml::reader::XmlEvent::StartElement{ name, .. } = reader.peek()?.to_owned() {
             (name.local_name.to_owned(), name.namespace.clone())
@@ -95,11 +95,11 @@ pub fn parse(
               }
 
               return ::std::result::Result::Err(
-                ::std::format!("End of document, missing some content ?"),
+                ::yaserde::Error::custom(::std::format!("End of document, missing some content ?")),
               );
             }
             event => {
-              return ::std::result::Result::Err(::std::format!("unknown event {:?}", event))
+              return ::std::result::Result::Err(::yaserde::Error::custom(::std::format!("unknown event {:?}", event)))
             }
           }
         }
@@ -108,10 +108,10 @@ pub fn parse(
         ::std::result::Result::Ok(enum_value.unwrap_or(<#name as ::std::default::Default>::default()))
       }
     }
-  }
+  })
 }
 
-fn parse_variant(variant: &syn::Variant, name: &Ident) -> Option<TokenStream> {
+fn parse_variant(variant: &syn::Variant, name: &Ident) -> syn::Result<TokenStream> {
   let xml_element_name = YaSerdeAttribute::from(&variant.attrs).xml_element_name(&variant.ident);
 
   let variant_name = {
@@ -120,47 +120,41 @@ fn parse_variant(variant: &syn::Variant, name: &Ident) -> Option<TokenStream> {
   };
 
   match variant.fields {
-    Fields::Unit => Some(quote! {
+    Fields::Unit => Ok(quote! {
       #xml_element_name => {
         enum_value = ::std::option::Option::Some(#variant_name);
         break;
       }
     }),
     Fields::Unnamed(ref fields) => {
-      let field_visitors = build_unnamed_field_visitors(fields);
-      let call_visitors = build_unnamed_visitor_calls(fields, &variant_name);
-
       if fields.unnamed.len() > 1 {
-        unimplemented!("enum variant with multiple fields")
+        return Err(syn::Error::new_spanned(
+          fields,
+          "YaSerDe: enum variants with multiple fields are not supported",
+        ));
       }
 
-      Some(
-        fields
-          .unnamed
-          .iter()
-          .take(1)
-          .map(|_field| {
-            quote! {
-              #xml_element_name => {
-                #field_visitors
-                #call_visitors
-              }
-            }
-          })
-          .collect(),
-      )
+      let field_visitors = build_unnamed_field_visitors(fields)?;
+      let call_visitors = build_unnamed_visitor_calls(fields, &variant_name)?;
+
+      Ok(quote! {
+        #xml_element_name => {
+          #field_visitors
+          #call_visitors
+        }
+      })
     }
-    _ => None,
+    _ => Ok(TokenStream::new()),
   }
 }
 
-fn build_unnamed_field_visitors(fields: &syn::FieldsUnnamed) -> TokenStream {
+fn build_unnamed_field_visitors(fields: &syn::FieldsUnnamed) -> syn::Result<TokenStream> {
   fields
     .unnamed
     .iter()
     .map(|field| YaSerdeField::new(field.clone()))
     .enumerate()
-    .filter_map(|(idx, field)| {
+    .map(|(idx, field)| {
       let visitor_label = Ident::new(&format!("__Visitor_{}", idx), field.get_span());
 
       let make_visitor = |visitor: &Ident, field_type: &TokenStream, fn_body: &TokenStream| {
@@ -173,7 +167,7 @@ fn build_unnamed_field_visitors(fields: &syn::FieldsUnnamed) -> TokenStream {
             fn #visitor(
               self,
               v: &str,
-            ) -> ::std::result::Result<Self::Value, ::std::string::String> {
+            ) -> ::std::result::Result<Self::Value, ::yaserde::Error> {
               #fn_body
             }
           }
@@ -187,7 +181,7 @@ fn build_unnamed_field_visitors(fields: &syn::FieldsUnnamed) -> TokenStream {
         make_visitor(
           &visitor,
           &field_type,
-          &quote! { #field_type::from_str(v).map_err(|e| e.to_string()) },
+          &quote! { #field_type::from_str(v).map_err(::yaserde::Error::custom) },
         )
       };
 
@@ -199,7 +193,7 @@ fn build_unnamed_field_visitors(fields: &syn::FieldsUnnamed) -> TokenStream {
             .map(|s| s.ident.to_string())
             .collect();
 
-          Some(make_visitor(
+          Ok(make_visitor(
             &Ident::new("visit_str", Span::call_site()),
             &quote! { #struct_name },
             &quote! {
@@ -210,17 +204,20 @@ fn build_unnamed_field_visitors(fields: &syn::FieldsUnnamed) -> TokenStream {
                 + "</"
                 + #struct_id
                 + ">";
-              let value: ::std::result::Result<#struct_name, ::std::string::String> =
+              let value: ::std::result::Result<#struct_name, ::yaserde::Error> =
                 ::yaserde::de::from_str(&content);
               value
             },
           ))
         }
         Field::FieldOption { data_type } | Field::FieldVec { data_type } => match *data_type {
-          Field::FieldStruct { .. } => None,
-          simple_type => Some(simple_type_visitor(simple_type)),
+          Field::FieldStruct { .. } => Ok(TokenStream::new()),
+          Field::FieldOption { .. } | Field::FieldVec { .. } => Err(field.unsupported(
+            "`Option` or `Vec` nested in `Option` or `Vec` is not supported in enum variants",
+          )),
+          simple_type => Ok(simple_type_visitor(simple_type)),
         },
-        simple_type => Some(simple_type_visitor(simple_type)),
+        simple_type => Ok(simple_type_visitor(simple_type)),
       }
     })
     .collect()
@@ -229,8 +226,8 @@ fn build_unnamed_field_visitors(fields: &syn::FieldsUnnamed) -> TokenStream {
 fn build_unnamed_visitor_calls(
   fields: &syn::FieldsUnnamed,
   variant_name: &TokenStream,
-) -> TokenStream {
-  fields
+) -> syn::Result<TokenStream> {
+  let calls = fields
     .unnamed
     .iter()
     .map(|field| YaSerdeField::new(field.clone()))
@@ -256,7 +253,7 @@ fn build_unnamed_visitor_calls(
               visitor.#visitor(&s)
             } else {
               ::std::result::Result::Err(
-                ::std::format!("unable to parse content for {}", #label_name),
+                ::yaserde::Error::custom(::std::format!("unable to parse content for {}", #label_name)),
               )
             }
           })?;
@@ -291,7 +288,7 @@ fn build_unnamed_visitor_calls(
             #variant_name(v) => v.push(value),
             _ => {
               return ::std::result::Result::Err(
-                ::std::string::String::from("Got sequence of different types"),
+                ::yaserde::Error::custom("Got sequence of different types"),
               );
             }
           }
@@ -315,5 +312,7 @@ fn build_unnamed_visitor_calls(
         simple_type => call_simple_type_visitor(simple_type, set_val),
       }
     })
-    .collect()
+    .collect();
+
+  Ok(calls)
 }

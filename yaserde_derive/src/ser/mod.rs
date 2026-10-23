@@ -9,7 +9,7 @@ use crate::common::YaSerdeAttribute;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-pub fn expand_derive_serialize(ast: &syn::DeriveInput) -> Result<TokenStream, String> {
+pub fn expand_derive_serialize(ast: &syn::DeriveInput) -> syn::Result<TokenStream> {
   let name = &ast.ident;
   let attrs = &ast.attrs;
   let data = &ast.data;
@@ -25,12 +25,17 @@ pub fn expand_derive_serialize(ast: &syn::DeriveInput) -> Result<TokenStream, St
 
   let impl_block = match *data {
     syn::Data::Struct(ref data_struct) => {
-      expand_struct::serialize(data_struct, name, &root_name, &root_attributes, generics)
+      expand_struct::serialize(data_struct, name, &root_name, &root_attributes, generics)?
     }
     syn::Data::Enum(ref data_enum) => {
-      expand_enum::serialize(data_enum, name, &root_name, &root_attributes, generics)
+      expand_enum::serialize(data_enum, name, &root_name, &root_attributes, generics)?
     }
-    syn::Data::Union(ref _data_union) => return Err("YaSerDe does not support unions".into()),
+    syn::Data::Union(ref _data_union) => {
+      return Err(syn::Error::new_spanned(
+        name,
+        "YaSerDe does not support unions",
+      ));
+    }
   };
 
   Ok(quote! {

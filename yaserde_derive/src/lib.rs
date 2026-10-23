@@ -7,6 +7,8 @@ mod common;
 mod de;
 mod primitives;
 mod ser;
+#[cfg(test)]
+mod tests;
 
 use primitives::{hexbinary_serde, primitive_serde, primitive_yaserde};
 use proc_macro::TokenStream;
@@ -18,9 +20,7 @@ pub fn derive_deserialize(input: TokenStream) -> TokenStream {
   let ast = syn::parse_macro_input!(input as syn::DeriveInput);
 
   common::validate(&ast)
-    .and_then(|()| {
-      de::expand_derive_deserialize(&ast).map_err(|msg| syn::Error::new_spanned(&ast.ident, msg))
-    })
+    .and_then(|()| de::expand_derive_deserialize(&ast))
     .unwrap_or_else(syn::Error::into_compile_error)
     .into()
 }
@@ -30,9 +30,7 @@ pub fn derive_serialize(input: TokenStream) -> TokenStream {
   let ast = syn::parse_macro_input!(input as syn::DeriveInput);
 
   common::validate(&ast)
-    .and_then(|()| {
-      ser::expand_derive_serialize(&ast).map_err(|msg| syn::Error::new_spanned(&ast.ident, msg))
-    })
+    .and_then(|()| ser::expand_derive_serialize(&ast))
     .unwrap_or_else(syn::Error::into_compile_error)
     .into()
 }
@@ -54,8 +52,12 @@ pub fn derive_hexbinary(input: TokenStream) -> TokenStream {
 // Serialize & Deserialize a primitive newtype by generating a FromStr & Display implementation
 #[proc_macro_derive(PrimitiveYaSerde)]
 pub fn derive_primitive(input: TokenStream) -> TokenStream {
-  let serde: TokenStream2 = primitive_serde(input.clone()).into();
-  let yaserde: TokenStream2 = primitive_yaserde(input).into();
+  let ast = syn::parse_macro_input!(input as syn::DeriveInput);
+  let serde = match primitive_serde(&ast) {
+    Ok(serde) => serde,
+    Err(error) => return error.into_compile_error().into(),
+  };
+  let yaserde: TokenStream2 = primitive_yaserde(quote!(#ast).into()).into();
 
   quote!(
       use ::std::str::FromStr as _;

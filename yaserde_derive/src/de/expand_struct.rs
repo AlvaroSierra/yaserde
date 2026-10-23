@@ -10,7 +10,7 @@ pub fn parse(
   root: &str,
   root_attributes: &YaSerdeAttribute,
   generics: &Generics,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
   let namespaces_matching = root_attributes.get_namespace_matching(
     &None,
     quote!(struct_namespace),
@@ -22,42 +22,58 @@ pub fn parse(
     .fields
     .iter()
     .map(|field| YaSerdeField::new(field.clone()))
-    .filter_map(|field| match field.get_type() {
-      Field::FieldStruct { struct_name } => build_default_value(&field, Some(quote!(#struct_name))),
+    .map(|field| match field.get_type() {
+      Field::FieldStruct { struct_name } => {
+        Ok(build_default_value(&field, Some(quote!(#struct_name))))
+      }
       Field::FieldOption { data_type } => match *data_type {
         Field::FieldVec {
           data_type: inner_data_type,
         } => match *inner_data_type {
-          Field::FieldStruct { ref struct_name } => {
-            build_default_value(&field, Some(quote!(::std::vec::Vec<#struct_name>)))
+          Field::FieldStruct { ref struct_name } => Ok(build_default_value(
+            &field,
+            Some(quote!(::std::vec::Vec<#struct_name>)),
+          )),
+          Field::FieldOption { .. } | Field::FieldVec { .. } => {
+            Err(field.unsupported("`Option` or `Vec` nested in `Option<Vec<_>>` is not supported"))
           }
           simple_type => {
             let type_token: TokenStream = simple_type.into();
-            build_default_value(&field, Some(quote!(::std::vec::Vec<#type_token>)))
+            Ok(build_default_value(
+              &field,
+              Some(quote!(::std::vec::Vec<#type_token>)),
+            ))
           }
         },
-        _ => build_default_value(&field, None),
+        Field::FieldOption { .. } => {
+          Err(field.unsupported("`Option` nested in `Option` is not supported"))
+        }
+        _ => Ok(build_default_value(&field, None)),
       },
       Field::FieldVec { data_type } => match *data_type {
-        Field::FieldStruct { ref struct_name } => {
-          build_default_vec_value(&field, Some(quote!(::std::vec::Vec<#struct_name>)))
-        }
+        Field::FieldStruct { ref struct_name } => Ok(build_default_vec_value(
+          &field,
+          Some(quote!(::std::vec::Vec<#struct_name>)),
+        )),
         Field::FieldOption { .. } | Field::FieldVec { .. } => {
-          unimplemented!("Option or Vec nested in Vec<>");
+          Err(field.unsupported("`Option` or `Vec` nested in `Vec` is not supported"))
         }
         simple_type => {
           let type_token: TokenStream = simple_type.into();
 
-          build_default_vec_value(&field, Some(quote!(::std::vec::Vec<#type_token>)))
+          Ok(build_default_vec_value(
+            &field,
+            Some(quote!(::std::vec::Vec<#type_token>)),
+          ))
         }
       },
       simple_type => {
         let type_token: TokenStream = simple_type.into();
 
-        build_default_value(&field, Some(type_token))
+        Ok(build_default_value(&field, Some(type_token)))
       }
     })
-    .collect();
+    .collect::<syn::Result<_>>()?;
 
   let field_visitors: TokenStream = data_struct
     .fields
@@ -96,7 +112,7 @@ pub fn parse(
             fn visit_str(
               self,
               v: &str,
-            ) -> ::std::result::Result<Self::Value, ::std::string::String> {
+            ) -> ::std::result::Result<Self::Value, ::yaserde::Error> {
               // `v` is already unescaped by the XML reader, escape it again before re-parsing
               let content = format!(
                 "{}{}{}",
@@ -134,8 +150,8 @@ pub fn parse(
             fn #visitor(
               self,
               v: &str,
-            ) -> ::std::result::Result<Self::Value, ::std::string::String> {
-              #field_type::from_str(#map_if_bool).map_err(|e| e.to_string())
+            ) -> ::std::result::Result<Self::Value, ::yaserde::Error> {
+              #field_type::from_str(#map_if_bool).map_err(::yaserde::Error::custom)
             }
           }
         })
@@ -168,7 +184,7 @@ pub fn parse(
     .iter()
     .map(|field| YaSerdeField::new(field.clone()))
     .filter(|field| !field.is_attribute() && !field.is_flatten())
-    .filter_map(|field| {
+    .map(|field| -> syn::Result<TokenStream> {
       let value_label = field.get_value_label();
       let label_name = field.renamed_label_without_namespace();
 
@@ -201,55 +217,52 @@ pub fn parse(
       };
 
       let visit_sub = |sub_type: Box<Field>, action: TokenStream| match *sub_type {
-        Field::FieldOption { .. } | Field::FieldVec { .. } => unimplemented!(),
-        Field::FieldStruct { struct_name } => visit_struct(struct_name, action),
-        simple_type => visit_simple(simple_type, action),
+        Field::FieldOption { .. } | Field::FieldVec { .. } => {
+          Err(field.unsupported("`Option` or `Vec` nested in `Option` or `Vec` is not supported"))
+        }
+        Field::FieldStruct { struct_name } => Ok(visit_struct(struct_name, action)),
+        simple_type => Ok(visit_simple(simple_type, action)),
       };
 
-      match field.get_type() {
-        Field::FieldStruct { struct_name } => {
-          visit_struct(struct_name, quote! { = ::std::option::Option::Some(value) })
-        }
+      let visitor = match field.get_type() {
+        Field::FieldStruct { struct_name } => Ok(visit_struct(
+          struct_name,
+          quote! { = ::std::option::Option::Some(value) },
+        )),
         Field::FieldOption { data_type } => match *data_type {
           Field::FieldVec {
             data_type: inner_data_type,
           } => match *inner_data_type {
             Field::FieldStruct { struct_name } => {
               // Handle Option<Vec<Struct>>
-              visit_struct(
+              Ok(visit_struct(
                 struct_name,
-                quote! {
-                  = if #value_label.is_some() {
-                    #value_label.as_mut().unwrap().push(value);
-                    #value_label
-                  } else {
-                    Some(vec![value])
-                  }
-                },
-              )
+                quote! { .get_or_insert_with(::std::vec::Vec::new).push(value) },
+              ))
             }
+            Field::FieldOption { .. } | Field::FieldVec { .. } => Err(
+              field.unsupported("`Option` or `Vec` nested in `Option<Vec<_>>` is not supported"),
+            ),
             simple_type => {
               // Handle Option<Vec<simple_type>>
-              visit_simple(
+              Ok(visit_simple(
                 simple_type,
-                quote! {
-                  = if #value_label.is_some() {
-                    #value_label.as_mut().unwrap().push(value);
-                    #value_label
-                  } else {
-                    Some(vec![value])
-                  }
-                },
-              )
+                quote! { .get_or_insert_with(::std::vec::Vec::new).push(value) },
+              ))
             }
           },
           _ => visit_sub(data_type, quote! { = ::std::option::Option::Some(value) }),
         },
         Field::FieldVec { data_type } => visit_sub(data_type, quote! { .push(value) }),
-        simple_type => visit_simple(simple_type, quote! { = ::std::option::Option::Some(value) }),
-      }
+        simple_type => Ok(visit_simple(
+          simple_type,
+          quote! { = ::std::option::Option::Some(value) },
+        )),
+      }?;
+
+      Ok(visitor.unwrap_or_default())
     })
-    .collect();
+    .collect::<syn::Result<_>>()?;
 
   let call_flatten_visitors: TokenStream = data_struct
     .fields
@@ -260,26 +273,26 @@ pub fn parse(
       let value_label = field.get_value_label();
 
       match field.get_type() {
-        Field::FieldStruct { .. } => quote! {
+        Field::FieldStruct { .. } => Ok(quote! {
           #value_label = Some(::yaserde::de::from_str(&unused_xml_elements)?);
-        },
+        }),
         Field::FieldOption { data_type } => match *data_type {
-          Field::FieldStruct { .. } => quote! {
+          Field::FieldStruct { .. } => Ok(quote! {
             #value_label = ::yaserde::de::from_str(&unused_xml_elements).ok();
-          },
-          field_type => unimplemented!(r#""flatten" is not implemented for {:?}"#, field_type),
+          }),
+          _ => Err(field.unsupported("`flatten` is only supported on struct fields")),
         },
-        field_type => unimplemented!(r#""flatten" is not implemented for {:?}"#, field_type),
+        _ => Err(field.unsupported("`flatten` is only supported on struct fields")),
       }
     })
-    .collect();
+    .collect::<syn::Result<_>>()?;
 
   let attributes_loading: TokenStream = data_struct
     .fields
     .iter()
     .map(|field| YaSerdeField::new(field.clone()))
     .filter(|field| field.is_attribute())
-    .filter_map(|field| {
+    .map(|field| -> syn::Result<TokenStream> {
       let label = field.get_value_label();
       let label_name = field.renamed_label_without_namespace();
       let visitor_label = field.get_visitor_ident(None);
@@ -314,13 +327,11 @@ pub fn parse(
         Some(quote! {
           for attr in attributes {
             if attr.name.local_name == #label_name {
-              if #label.is_none() {
-                #label = Some(Vec::new());
-              }
+              let values = #label.get_or_insert_with(::std::vec::Vec::new);
               for value in attr.value.split_whitespace() {
                 let visitor = #visitor_label{};
                 let value = visitor.#visitor(value)?;
-                #label.as_mut().unwrap().push(value);
+                values.push(value);
               }
             }
           }
@@ -353,46 +364,56 @@ pub fn parse(
         )
       };
 
-      let visit_sub = |sub_type: Box<Field>, action: TokenStream| match *sub_type {
-        Field::FieldOption { .. } => unimplemented!(),
-        Field::FieldVec { data_type } => match data_type.as_ref() {
-          Field::FieldStruct { struct_name } => visit_option_vec(
-            &Ident::new("visit_str", field.get_span()),
-            &field.get_visitor_ident(Some(struct_name)),
-          ),
-          Field::FieldOption { .. } | Field::FieldVec { .. } => unimplemented!("Not supported"),
-          simple_type => visit_option_vec(
-            &simple_type.get_simple_type_visitor(),
-            &field.get_visitor_ident(None),
-          ),
-        },
-        Field::FieldStruct { struct_name } => visit_struct(struct_name, action),
-        simple_type => visit_simple(simple_type, action),
+      let nested_error = || {
+        Err(field.unsupported(
+          "`Option` or `Vec` nested in `Option` or `Vec` is not supported for attributes",
+        ))
       };
 
-      match field.get_type() {
-        Field::FieldString => visit_string(),
+      let visit_sub = |sub_type: Box<Field>, action: TokenStream| match *sub_type {
+        Field::FieldOption { .. } => nested_error(),
+        Field::FieldVec { data_type } => match data_type.as_ref() {
+          Field::FieldStruct { struct_name } => Ok(visit_option_vec(
+            &Ident::new("visit_str", field.get_span()),
+            &field.get_visitor_ident(Some(struct_name)),
+          )),
+          Field::FieldOption { .. } | Field::FieldVec { .. } => nested_error(),
+          simple_type => Ok(visit_option_vec(
+            &simple_type.get_simple_type_visitor(),
+            &field.get_visitor_ident(None),
+          )),
+        },
+        Field::FieldStruct { struct_name } => Ok(visit_struct(struct_name, action)),
+        simple_type => Ok(visit_simple(simple_type, action)),
+      };
+
+      let visitor = match field.get_type() {
+        Field::FieldString => Ok(visit_string()),
         Field::FieldOption { data_type } => {
           visit_sub(data_type, quote! { = ::std::option::Option::Some(value) })
         }
         Field::FieldVec { data_type } => match data_type.as_ref() {
-          Field::FieldStruct { struct_name } => visit_vec(
+          Field::FieldStruct { struct_name } => Ok(visit_vec(
             &quote! { .push(value) },
             &Ident::new("visit_str", field.get_span()),
             &field.get_visitor_ident(Some(struct_name)),
-          ),
-          Field::FieldOption { .. } | Field::FieldVec { .. } => unimplemented!("Not supported"),
-          simple_type => visit_vec(
+          )),
+          Field::FieldOption { .. } | Field::FieldVec { .. } => nested_error(),
+          simple_type => Ok(visit_vec(
             &quote! { .push(value) },
             &simple_type.get_simple_type_visitor(),
             &visitor_label,
-          ),
+          )),
         },
-        Field::FieldStruct { struct_name } => visit_struct(struct_name, quote! { = Some(value) }),
-        simple_type => visit_simple(simple_type, quote! { = Some(value) }),
-      }
+        Field::FieldStruct { struct_name } => {
+          Ok(visit_struct(struct_name, quote! { = Some(value) }))
+        }
+        simple_type => Ok(visit_simple(simple_type, quote! { = Some(value) })),
+      }?;
+
+      Ok(visitor.unwrap_or_default())
     })
-    .collect();
+    .collect::<syn::Result<_>>()?;
 
   let set_text: TokenStream = data_struct
     .fields
@@ -419,7 +440,7 @@ pub fn parse(
         simple_type => {
           let type_token = TokenStream::from(simple_type);
           set_text(&quote! {
-            ::std::option::Option::Some(#type_token::from_str(text_content).map_err(|e| e.to_string())?)
+            ::std::option::Option::Some(#type_token::from_str(text_content).map_err(::yaserde::Error::custom)?)
           })
         }
       }
@@ -451,7 +472,7 @@ pub fn parse(
               name
             );
 
-            quote! { #label: #value_label.ok_or_else(|| #error.to_string())?, }
+            quote! { #label: #value_label.ok_or_else(|| ::yaserde::Error::custom(#error))?, }
           }
         }
       }
@@ -467,12 +488,12 @@ pub fn parse(
   let flatten = root_attributes.flatten;
   let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-  quote! {
+  Ok(quote! {
     impl #impl_generics ::yaserde::YaDeserialize for #name #ty_generics #where_clause {
       #[allow(unused_variables)]
       fn deserialize<R: ::std::io::Read>(
         reader: &mut ::yaserde::de::Deserializer<R>,
-      ) -> ::std::result::Result<Self, ::std::string::String> {
+      ) -> ::std::result::Result<Self, ::yaserde::Error> {
         let (named_element, struct_namespace) =
           if let ::yaserde::__xml::reader::XmlEvent::StartElement { name, .. } = reader.peek()?.to_owned() {
             (name.local_name.to_owned(), name.namespace.clone())
@@ -491,7 +512,9 @@ pub fn parse(
         #field_visitors
         #init_unused
 
-        let mut depth = 0;
+        // The first start element is the struct's own element. A flattened struct has none: its first start
+        // element is either a child, or the parent's element when the struct is flattened into another one.
+        let mut first_element = true;
 
         loop {
           let event = reader.peek()?.to_owned();
@@ -502,21 +525,21 @@ pub fn parse(
           match event {
             ::yaserde::__xml::reader::XmlEvent::StartElement{ref name, ref attributes, ..} => {
               let namespace = name.namespace.clone().unwrap_or_default();
-              if depth == 0 && !#flatten {
-                // Consume root element. We must do this first. In the case it shares a name with a child element, we don't
-                // want to prematurely match the child element below. The root element may be renamed by the parent
-                // field, so it is not compared with the struct's own name. A flattened struct has no root element.
+              if first_element && !#flatten {
+                // Consume the struct's own element first: when it shares a name with a child element, it must
+                // not be matched as that child below. It is not compared with the struct's name, as the parent
+                // field may rename it.
                 let event = reader.next_event()?;
                 #write_unused
               } else {
-
                 match (namespace.as_str(), name.local_name.as_str()) {
                   #call_visitors
                   _ => {
                     let event = reader.next_event()?;
                     #write_unused
 
-                    if depth > 0 { // Don't skip root element
+                    // The parent's element of a flattened struct is entered, not skipped
+                    if !first_element {
                       reader.skip_element(|event| {
                         #write_unused
                       })?;
@@ -524,10 +547,11 @@ pub fn parse(
                   }
                 }
               }
-              if depth == 0 { // Look for attributes only at element start
+              if first_element {
+                // Attributes are only read from the struct's own element
                 #attributes_loading
+                first_element = false;
               }
-              depth += 1;
             }
             ::yaserde::__xml::reader::XmlEvent::EndElement { ref name } => {
               if name.local_name == named_element && reader.depth() == start_depth + 1 {
@@ -536,7 +560,6 @@ pub fn parse(
               }
               let event = reader.next_event()?;
               #write_unused
-              depth -= 1;
             }
             ::yaserde::__xml::reader::XmlEvent::EndDocument => {
               if #flatten {
@@ -549,7 +572,7 @@ pub fn parse(
               #write_unused
             }
             event => {
-              return ::std::result::Result::Err(::std::format!("unknown event {:?}", event));
+              return ::std::result::Result::Err(::yaserde::Error::custom(::std::format!("unknown event {:?}", event)));
             }
           }
         }
@@ -560,7 +583,7 @@ pub fn parse(
         ::std::result::Result::Ok(#name{#struct_builder})
       }
     }
-  }
+  })
 }
 
 fn build_call_visitor(
@@ -597,9 +620,9 @@ fn build_call_visitor(
           }
           // Empty element, e.g. `<field></field>` or `<field/>`
           ::yaserde::__xml::reader::XmlEvent::EndElement { .. } => visitor.#visitor(""),
-          _ => ::std::result::Result::Err(::std::format!("unable to parse content for {}", #label_name)),
+          _ => ::std::result::Result::Err(::yaserde::Error::custom(::std::format!("unable to parse content for {}", #label_name))),
         }
-      }).map_err(|e| ::std::format!("{}: {}", #label_name, e))?;
+      }).map_err(|e| e.in_field(#label_name))?;
 
       #value_label #action
     }

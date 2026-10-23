@@ -19,10 +19,11 @@ fn de_no_content() {
   }
 
   let content = "";
-  let loaded: Result<Book, String> = from_str(content);
+  let error = from_str::<Book>(content).unwrap_err();
+  assert!(matches!(error, yaserde::Error::Reader(_)));
   assert_eq!(
-    loaded,
-    Err("Unexpected end of stream: no root element found".to_owned())
+    error.to_string(),
+    "1:1 Unexpected end of stream: no root element found"
   );
 }
 
@@ -38,7 +39,7 @@ fn de_wrong_end_balise() {
   }
 
   let content = "<book><author>Antoine de Saint-Exupéry<title>Little prince</title></book>";
-  let loaded: Result<Book, String> = from_str(content);
+  let loaded: Result<Book, String> = from_str(content).map_err(|e| e.to_string());
   assert_eq!(
     loaded,
     Err("author: Expected end tag </author>, found start tag <title>".to_owned())
@@ -55,11 +56,9 @@ fn de_invalid_value() {
     required: Option<u32>,
   }
 
-  let loaded: Result<Data, String> = from_str("<data><required>abc</required></data>");
-  assert_eq!(
-    loaded,
-    Err("required: invalid digit found in string".to_owned())
-  );
+  let error = from_str::<Data>("<data><required>abc</required></data>").unwrap_err();
+  assert!(matches!(&error, yaserde::Error::Field { name, .. } if name == "required"));
+  assert_eq!(error.to_string(), "required: invalid digit found in string");
 }
 
 #[test]
@@ -73,7 +72,7 @@ fn de_invalid_text_content() {
     value: u32,
   }
 
-  let loaded: Result<Data, String> = from_str("<data>abc</data>");
+  let loaded: Result<Data, String> = from_str("<data>abc</data>").map_err(|e| e.to_string());
   assert_eq!(loaded, Err("invalid digit found in string".to_owned()));
 }
 
@@ -95,6 +94,7 @@ fn de_invalid_enum_value() {
     data: Data,
   }
 
-  let loaded: Result<Base, String> = from_str("<base><data><Value>abc</Value></data></base>");
+  let loaded: Result<Base, String> =
+    from_str("<base><data><Value>abc</Value></data></base>").map_err(|e| e.to_string());
   assert_eq!(loaded, Err("invalid digit found in string".to_owned()));
 }

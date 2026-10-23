@@ -38,17 +38,28 @@ To implement it, define the implementation of YaDeserialize/YaSerialize
 
 ```rust
 impl YaDeserialize for MyType {
-  fn deserialize<R: Read>(reader: &mut yaserde::de::Deserializer<R>) -> Result<Self, String> {
+  fn deserialize<R: Read>(reader: &mut yaserde::de::Deserializer<R>) -> yaserde::Result<Self> {
     // deserializer code
   }
 }
 ```
 
 ```rust
-
 impl YaSerialize for MyType {
-  fn serialize<W: Write>(&self, writer: &mut yaserde::ser::Serializer<W>) -> Result<(), String> {
+  fn serialize<W: Write>(&self, writer: &mut yaserde::ser::Serializer<W>) -> yaserde::Result<()> {
     // serializer code
   }
 }
 ```
+
+## Errors
+
+Serialization and deserialization return a `yaserde::Error`:
+
+- `Error::Reader`: the XML input is malformed, with its position in the input.
+- `Error::Writer`: the XML output could not be written.
+- `Error::Message`: the XML does not match the expected structure, or a value could not be converted.
+  Create one with `yaserde::Error::custom(message)` in a custom implementation.
+- `Error::Field`: an error located in a field, with the field's XML name.
+
+Writer errors convert with `?`, and `String` or `&str` messages convert with `.into()`.

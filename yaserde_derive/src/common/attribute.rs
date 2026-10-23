@@ -174,7 +174,7 @@ impl YaSerdeAttribute {
           bad_namespace => {
             let msg =
               ::std::format!("bad namespace for {}, found {}", #element_name, bad_namespace);
-            return Err(msg);
+            return Err(::yaserde::Error::custom(msg));
           }
         }
       }

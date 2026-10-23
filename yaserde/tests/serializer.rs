@@ -383,12 +383,12 @@ fn ser_custom() {
   }
 
   impl YaSerialize for Day {
-    fn serialize<W: Write>(&self, writer: &mut yaserde::ser::Serializer<W>) -> Result<(), String> {
-      let _ret = writer.write(xml::writer::XmlEvent::start_element("DoubleDay"));
-      let _ret = writer.write(xml::writer::XmlEvent::characters(
+    fn serialize<W: Write>(&self, writer: &mut yaserde::ser::Serializer<W>) -> yaserde::Result<()> {
+      writer.write(xml::writer::XmlEvent::start_element("DoubleDay"))?;
+      writer.write(xml::writer::XmlEvent::characters(
         &(self.value * 2).to_string(),
-      ));
-      let _ret = writer.write(xml::writer::XmlEvent::end_element());
+      ))?;
+      writer.write(xml::writer::XmlEvent::end_element())?;
       Ok(())
     }
 
@@ -396,13 +396,10 @@ fn ser_custom() {
       &self,
       attributes: Vec<xml::attribute::OwnedAttribute>,
       namespace: xml::namespace::Namespace,
-    ) -> Result<
-      (
-        Vec<xml::attribute::OwnedAttribute>,
-        xml::namespace::Namespace,
-      ),
-      String,
-    > {
+    ) -> yaserde::Result<(
+      Vec<xml::attribute::OwnedAttribute>,
+      xml::namespace::Namespace,
+    )> {
       Ok((attributes, namespace))
     }
   }

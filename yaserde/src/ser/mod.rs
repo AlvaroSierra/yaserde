@@ -1,14 +1,14 @@
 //! Generic data structure serialization framework.
 //!
 
-use crate::YaSerialize;
+use crate::{Error, Result, YaSerialize};
 use std::io::{Cursor, Write};
 use std::str;
 use xml::writer::XmlEvent;
 use xml::{EmitterConfig, EventWriter};
 
 /// Serialize XML into a plain String with no formatting (EmitterConfig).
-pub fn to_string<T: YaSerialize>(model: &T) -> Result<String, String> {
+pub fn to_string<T: YaSerialize>(model: &T) -> Result<String> {
   let buf = Cursor::new(Vec::new());
   let cursor = serialize_with_writer(model, buf, &Config::default())?;
   let data = str::from_utf8(cursor.get_ref()).expect("Found invalid UTF-8");
@@ -16,7 +16,7 @@ pub fn to_string<T: YaSerialize>(model: &T) -> Result<String, String> {
 }
 
 /// Serialize XML into a plain String with control on formatting (via EmitterConfig parameters)
-pub fn to_string_with_config<T: YaSerialize>(model: &T, config: &Config) -> Result<String, String> {
+pub fn to_string_with_config<T: YaSerialize>(model: &T, config: &Config) -> Result<String> {
   let buf = Cursor::new(Vec::new());
   let cursor = serialize_with_writer(model, buf, config)?;
   let data = str::from_utf8(cursor.get_ref()).expect("Found invalid UTF-8");
@@ -27,7 +27,7 @@ pub fn serialize_with_writer<W: Write, T: YaSerialize>(
   model: &T,
   writer: W,
   config: &Config,
-) -> Result<W, String> {
+) -> Result<W> {
   let mut serializer = Serializer::new_from_writer(writer, config);
   match YaSerialize::serialize(model, &mut serializer) {
     Ok(()) => Ok(serializer.into_inner()),
@@ -35,17 +35,14 @@ pub fn serialize_with_writer<W: Write, T: YaSerialize>(
   }
 }
 
-pub fn to_string_content<T: YaSerialize>(model: &T) -> Result<String, String> {
+pub fn to_string_content<T: YaSerialize>(model: &T) -> Result<String> {
   let buf = Cursor::new(Vec::new());
   let cursor = serialize_with_writer_content(model, buf)?;
   let data = str::from_utf8(cursor.get_ref()).expect("Found invalid UTF-8");
   Ok(data.into())
 }
 
-pub fn serialize_with_writer_content<W: Write, T: YaSerialize>(
-  model: &T,
-  writer: W,
-) -> Result<W, String> {
+pub fn serialize_with_writer_content<W: Write, T: YaSerialize>(model: &T, writer: W) -> Result<W> {
   let mut serializer = Serializer::new_for_inner(writer);
   serializer.set_skip_start_end(true);
   match YaSerialize::serialize(model, &mut serializer) {
@@ -57,14 +54,14 @@ pub fn serialize_with_writer_content<W: Write, T: YaSerialize>(
 /// Serialize a value as raw, unescaped text to be used as an attribute value.
 /// The XML writer escapes attribute values itself, so escaping here would escape twice.
 #[doc(hidden)]
-pub fn to_string_attribute_value<T: YaSerialize>(model: &T) -> Result<String, String> {
+pub fn to_string_attribute_value<T: YaSerialize>(model: &T) -> Result<String> {
   let mut config = EmitterConfig::new().write_document_declaration(false);
   config.perform_escaping = false;
 
   let mut serializer = Serializer::new(EventWriter::new_with_config(Vec::new(), config));
   serializer.set_skip_start_end(true);
   YaSerialize::serialize(model, &mut serializer)?;
-  String::from_utf8(serializer.into_inner()).map_err(|e| e.to_string())
+  String::from_utf8(serializer.into_inner()).map_err(Error::custom)
 }
 
 pub struct Serializer<W: Write> {

@@ -15,7 +15,9 @@ fn init() {
 macro_rules! convert_and_validate {
   ($content: expr, $struct: tt, $model: expr) => {
     debug!("convert_and_validate @ {}:{}", file!(), line!());
-    let loaded: Result<$struct, String> = from_str($content);
+    let loaded: Result<$struct, String> = from_str($content)
+      .map_err(|e| e.to_string())
+      .map_err(|e| e.to_string());
     assert_eq!(loaded, Ok($model));
   };
 }
@@ -242,7 +244,7 @@ fn de_attributes_custom_deserializer() {
     }
 
     impl YaDeserialize for Attributes {
-      fn deserialize<R: Read>(reader: &mut yaserde::de::Deserializer<R>) -> Result<Self, String> {
+      fn deserialize<R: Read>(reader: &mut yaserde::de::Deserializer<R>) -> yaserde::Result<Self> {
         loop {
           match reader.next_event()? {
             XmlEvent::StartElement { .. } => {}
@@ -259,7 +261,7 @@ fn de_attributes_custom_deserializer() {
           }
         }
 
-        Err("Unable to parse attribute".to_string())
+        Err(yaserde::Error::custom("Unable to parse attribute"))
       }
     }
   }
@@ -804,28 +806,28 @@ fn de_custom() {
   }
 
   impl YaDeserialize for Day {
-    fn deserialize<R: Read>(reader: &mut yaserde::de::Deserializer<R>) -> Result<Self, String> {
+    fn deserialize<R: Read>(reader: &mut yaserde::de::Deserializer<R>) -> yaserde::Result<Self> {
       use std::str::FromStr;
 
       if let xml::reader::XmlEvent::StartElement { name, .. } = reader.peek()?.to_owned() {
         let expected_name = "Day".to_owned();
         if name.local_name != expected_name {
-          return Err(format!(
+          return Err(yaserde::Error::custom(format!(
             "Wrong StartElement name: {}, expected: {}",
             name, expected_name
-          ));
+          )));
         }
         let _next = reader.next_event();
       } else {
-        return Err("StartElement missing".to_string());
+        return Err(yaserde::Error::custom("StartElement missing"));
       }
 
       if let xml::reader::XmlEvent::Characters(text) = reader.peek()?.to_owned() {
         Ok(Day {
-          value: 2 * i32::from_str(&text).unwrap(),
+          value: 2 * i32::from_str(&text).map_err(yaserde::Error::custom)?,
         })
       } else {
-        Err("Characters missing".to_string())
+        Err(yaserde::Error::custom("Characters missing"))
       }
     }
   }

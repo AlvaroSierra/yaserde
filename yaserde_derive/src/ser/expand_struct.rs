@@ -12,16 +12,16 @@ pub fn serialize(
   root: &str,
   root_attributes: &YaSerdeAttribute,
   generics: &Generics,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
   let append_attributes: TokenStream = data_struct
     .fields
     .iter()
     .map(|field| YaSerdeField::new(field.clone()))
     .filter(|field| field.is_attribute() || field.is_flatten())
-    .map(|field| {
+    .map(|field| -> syn::Result<TokenStream> {
       let label = field.label();
 
-      if field.is_attribute() {
+      Ok(if field.is_attribute() {
         let label_name = field.renamed_label(root_attributes);
 
         match field.get_type() {
@@ -91,7 +91,7 @@ pub fn serialize(
                 &field,
                 &label,
                 &label_name,
-                quote!(::std::result::Result::<_, ::std::string::String>::Ok(
+                quote!(::std::result::Result::<_, ::yaserde::Error>::Ok(
                   item.to_string()
                 )),
               ),
@@ -102,7 +102,9 @@ pub fn serialize(
                 quote!(::yaserde::ser::to_string_attribute_value(item)),
               ),
               _ => {
-                unimplemented!("Complex data types in Option<Vec<T>> attributes not yet supported")
+                return Err(field.unsupported(
+                  "`Option` or `Vec` nested in `Option<Vec<_>>` is not supported for attributes",
+                ));
               }
             },
             Field::FieldStruct { .. } => field.ser_wrap_default_attribute(
@@ -122,7 +124,11 @@ pub fn serialize(
                 }
               }),
             ),
-            Field::FieldOption { .. } => unimplemented!(),
+            Field::FieldOption { .. } => {
+              return Err(
+                field.unsupported("`Option` nested in `Option` is not supported for attributes"),
+              );
+            }
           },
           Field::FieldStruct { .. } => field.ser_wrap_default_attribute(
             Some(quote! { ::yaserde::ser::to_string_attribute_value(&self.#label)? }),
@@ -155,7 +161,10 @@ pub fn serialize(
               }),
             ),
             Field::FieldOption { .. } | Field::FieldVec { .. } => {
-              unimplemented!("Nested Option or Vec in Vec not supported for attributes")
+              return Err(
+                field
+                  .unsupported("`Option` or `Vec` nested in `Vec` is not supported for attributes"),
+              );
             }
             Field::FieldStruct { .. } => field.ser_wrap_default_attribute(
               Some(quote! {
@@ -185,52 +194,52 @@ pub fn serialize(
           }
           _ => quote!(),
         }
-      }
+      })
     })
-    .collect();
+    .collect::<syn::Result<_>>()?;
 
   let struct_inspector: TokenStream = data_struct
     .fields
     .iter()
     .map(|field| YaSerdeField::new(field.clone()))
     .filter(|field| !field.is_attribute())
-    .filter_map(|field| {
+    .map(|field| -> syn::Result<Option<TokenStream>> {
       let label = field.label();
       if field.is_text_content() {
-        return match field.get_type() {
+        return Ok(match field.get_type() {
           Field::FieldOption { .. } => Some(quote!(
             let s = self.#label.as_deref().unwrap_or_default();
             let data_event = ::yaserde::__xml::writer::XmlEvent::characters(s);
-            writer.write(data_event).map_err(|e| e.to_string())?;
+            writer.write(data_event)?;
           )),
           Field::FieldString => Some(quote!(
             let data_event = ::yaserde::__xml::writer::XmlEvent::characters(&self.#label);
-            writer.write(data_event).map_err(|e| e.to_string())?;
+            writer.write(data_event)?;
           )),
           _ => Some(quote!(
             let yaserde_value = self.#label.to_string();
             let data_event = ::yaserde::__xml::writer::XmlEvent::characters(&yaserde_value);
-            writer.write(data_event).map_err(|e| e.to_string())?;
+            writer.write(data_event)?;
           )),
-        };
+        });
       }
       let label_name = field.renamed_label(root_attributes);
       let conditions = condition_generator(&label, &field);
 
       if field.is_cdata() {
-        return quote! {
+        return Ok(Some(quote! {
             #conditions {
               let start_event = ::yaserde::__xml::writer::XmlEvent::start_element(#label_name);
-              writer.write(start_event).map_err(|e| e.to_string())?;
+              writer.write(start_event)?;
               let data = ::yaserde::__xml::writer::events::XmlEvent::cdata(&self.#label);
-              writer.write(data).map_err(|e| e.to_string())?;
+              writer.write(data)?;
               let end_event = ::yaserde::__xml::writer::XmlEvent::end_element();
-              writer.write(end_event).map_err(|e| e.to_string())?;
+              writer.write(end_event)?;
             }
-        }.into()
+        }));
       }
 
-      match field.get_type() {
+      Ok(match field.get_type() {
         Field::FieldString
         | Field::FieldBool
         | Field::FieldI8
@@ -319,7 +328,9 @@ pub fn serialize(
               }
             }
           }),
-          _ => unimplemented!(),
+          Field::FieldOption { .. } => {
+            return Err(field.unsupported("`Option` nested in `Option` is not supported"));
+          }
         },
         Field::FieldStruct { .. } => {
           let (start_event, skip_start) = if field.is_flatten() {
@@ -420,21 +431,24 @@ pub fn serialize(
             })*/
           }
           Field::FieldVec { .. } => {
-            unimplemented!();
+            return Err(field.unsupported("`Vec` nested in `Vec` is not supported"));
           }
         },
-      }
+      })
     })
+    .collect::<syn::Result<Vec<_>>>()?
+    .into_iter()
+    .flatten()
     .collect();
 
-  implement_serializer(
+  Ok(implement_serializer(
     name,
     root,
     root_attributes,
     append_attributes,
     struct_inspector,
     generics,
-  )
+  ))
 }
 
 /// Helper function to generate serialization code for `Option<Vec<T>>` attributes
@@ -449,7 +463,7 @@ fn ser_option_vec_attribute(
       ::std::option::Option::Some(yaserde_list) => yaserde_list
         .iter()
         .map(|item| #item_serializer)
-        .collect::<::std::result::Result<::std::vec::Vec<_>, ::std::string::String>>()?
+        .collect::<::std::result::Result<::std::vec::Vec<_>, ::yaserde::Error>>()?
         .join(" "),
       ::std::option::Option::None => ::std::string::String::new(),
     }

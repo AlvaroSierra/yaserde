@@ -17,7 +17,7 @@ pub fn primitive_yaserde(input: TokenStream) -> TokenStream {
           fn serialize<W: ::std::io::Write>(
               &self,
               writer: &mut ::yaserde::ser::Serializer<W>,
-          ) -> ::std::result::Result<(), ::std::string::String> {
+          ) -> ::std::result::Result<(), ::yaserde::Error> {
             ::yaserde::primitives::serialize_primitives(
                   self,
                   #struct_name_literal,
@@ -34,7 +34,7 @@ pub fn primitive_yaserde(input: TokenStream) -> TokenStream {
                   ::std::vec::Vec<::yaserde::__xml::attribute::OwnedAttribute>,
                   ::yaserde::__xml::namespace::Namespace,
               ),
-              ::std::string::String,
+              ::yaserde::Error,
           > {
               Ok((attributes, namespace))
           }
@@ -43,10 +43,10 @@ pub fn primitive_yaserde(input: TokenStream) -> TokenStream {
       impl ::yaserde::YaDeserialize for #struct_name {
           fn deserialize<R: ::std::io::Read>(
               reader: &mut ::yaserde::de::Deserializer<R>,
-          ) -> ::std::result::Result<Self, ::std::string::String> {
+          ) -> ::std::result::Result<Self, ::yaserde::Error> {
               ::yaserde::primitives::deserialize_primitives(
                   reader,
-                  |s| #struct_name::from_str(s).map_err(|e| e.to_string()),
+                  |s| <#struct_name as ::std::str::FromStr>::from_str(s).map_err(::yaserde::Error::custom),
               )
           }
       }
@@ -81,12 +81,11 @@ pub fn hexbinary_serde(input: TokenStream) -> TokenStream {
   .into()
 }
 
-pub fn primitive_serde(input: TokenStream) -> TokenStream {
-  let first = input.clone();
-  let ref di @ DeriveInput { ref ident, .. } = parse_macro_input!(first);
-  let fromstr = extract_full_path(di).unwrap();
+pub fn primitive_serde(ast: &DeriveInput) -> syn::Result<TokenStream2> {
+  let ident = &ast.ident;
+  let fromstr = extract_full_path(ast)?;
 
-  quote!(
+  Ok(quote!(
     impl std::fmt::Display for #ident {
       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -100,8 +99,7 @@ pub fn primitive_serde(input: TokenStream) -> TokenStream {
         Ok(#ident(#fromstr))
       }
     }
-  )
-  .into()
+  ))
 }
 
 fn extract_full_path(ast: &syn::DeriveInput) -> Result<TokenStream2, syn::Error> {
@@ -115,5 +113,8 @@ fn extract_full_path(ast: &syn::DeriveInput) -> Result<TokenStream2, syn::Error>
     }
   }
 
-  Err(syn::Error::new_spanned(ast, "Unable to extract full path"))
+  Err(syn::Error::new_spanned(
+    &ast.ident,
+    "`PrimitiveYaSerde` can only be derived for a newtype struct, like `struct Value(u32);`",
+  ))
 }

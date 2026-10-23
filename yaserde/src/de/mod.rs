@@ -1,16 +1,16 @@
 //! Generic data structure deserialization framework.
 //!
 
-use crate::YaDeserialize;
+use crate::{Error, Result, YaDeserialize};
 use std::io::Read;
 use xml::name::OwnedName;
 use xml::reader::{EventReader, ParserConfig, XmlEvent};
 
-pub fn from_str<T: YaDeserialize>(s: &str) -> Result<T, String> {
+pub fn from_str<T: YaDeserialize>(s: &str) -> Result<T> {
   from_reader(s.as_bytes())
 }
 
-pub fn from_reader<R: Read, T: YaDeserialize>(reader: R) -> Result<T, String> {
+pub fn from_reader<R: Read, T: YaDeserialize>(reader: R) -> Result<T> {
   <T as YaDeserialize>::deserialize(&mut Deserializer::new_from_reader(reader))
 }
 
@@ -40,7 +40,7 @@ impl<R: Read> Deserializer<R> {
     Self::new(EventReader::new_with_config(reader, config))
   }
 
-  pub fn peek(&mut self) -> Result<&XmlEvent, String> {
+  pub fn peek(&mut self) -> Result<&XmlEvent> {
     if self.peeked.is_none() {
       self.peeked = Some(self.inner_next()?);
     }
@@ -48,11 +48,11 @@ impl<R: Read> Deserializer<R> {
     if let Some(ref next) = self.peeked {
       Ok(next)
     } else {
-      Err("unable to peek next item".into())
+      Err(Error::custom("unable to peek next item"))
     }
   }
 
-  pub fn inner_next(&mut self) -> Result<XmlEvent, String> {
+  pub fn inner_next(&mut self) -> Result<XmlEvent> {
     loop {
       match self.reader.next() {
         Ok(next) => {
@@ -64,13 +64,13 @@ impl<R: Read> Deserializer<R> {
           }
         }
         Err(msg) => {
-          return Err(msg.msg().to_string());
+          return Err(Error::Reader(msg));
         }
       }
     }
   }
 
-  pub fn next_event(&mut self) -> Result<XmlEvent, String> {
+  pub fn next_event(&mut self) -> Result<XmlEvent> {
     let next_event = if let Some(peeked) = self.peeked.take() {
       peeked
     } else {
@@ -89,7 +89,7 @@ impl<R: Read> Deserializer<R> {
     Ok(next_event)
   }
 
-  pub fn skip_element(&mut self, mut cb: impl FnMut(&XmlEvent)) -> Result<(), String> {
+  pub fn skip_element(&mut self, mut cb: impl FnMut(&XmlEvent)) -> Result<()> {
     let depth = self.depth;
 
     while self.depth >= depth {
@@ -103,37 +103,34 @@ impl<R: Read> Deserializer<R> {
     self.depth
   }
 
-  pub fn read_inner_value<T, F: FnOnce(&mut Self) -> Result<T, String>>(
-    &mut self,
-    f: F,
-  ) -> Result<T, String> {
+  pub fn read_inner_value<T, F: FnOnce(&mut Self) -> Result<T>>(&mut self, f: F) -> Result<T> {
     match self.next_event()? {
       XmlEvent::StartElement { name, .. } => {
         let result = f(self)?;
         self.expect_end_element(&name)?;
         Ok(result)
       }
-      event => Err(format!(
+      event => Err(Error::custom(format!(
         "Internal error: expected start element, found {event:?}"
-      )),
+      ))),
     }
   }
 
-  pub fn expect_end_element(&mut self, start_name: &OwnedName) -> Result<(), String> {
+  pub fn expect_end_element(&mut self, start_name: &OwnedName) -> Result<()> {
     match self.next_event()? {
       XmlEvent::EndElement { name, .. } if name == *start_name => Ok(()),
-      XmlEvent::EndElement { name, .. } => Err(format!(
+      XmlEvent::EndElement { name, .. } => Err(Error::custom(format!(
         "End tag </{}> didn't match the start tag <{}>",
         name.local_name, start_name.local_name
-      )),
-      XmlEvent::StartElement { name, .. } => Err(format!(
+      ))),
+      XmlEvent::StartElement { name, .. } => Err(Error::custom(format!(
         "Expected end tag </{}>, found start tag <{}>",
         start_name.local_name, name.local_name
-      )),
-      event => Err(format!(
+      ))),
+      event => Err(Error::custom(format!(
         "Expected end tag </{}>, found {:?}",
         start_name.local_name, event
-      )),
+      ))),
     }
   }
 }

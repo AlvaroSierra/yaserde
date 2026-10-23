@@ -118,7 +118,7 @@ fn option_bool_no_crash_on_bad_input() {
   }
 
   let content = "<field><content>/<R/";
-  let result: Result<Test, String> = yaserde::de::from_str(content);
+  let result: Result<Test, String> = yaserde::de::from_str(content).map_err(|e| e.to_string());
 
   assert!(result.is_err());
 }

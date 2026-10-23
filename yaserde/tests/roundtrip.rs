@@ -29,9 +29,10 @@ fn empty_string() {
     content,
     r#"<?xml version="1.0" encoding="UTF-8"?><base><item></item><optional></optional></base>"#
   );
-  assert_eq!(from_str(&content), Ok(model));
+  assert_eq!(from_str(&content).map_err(|e| e.to_string()), Ok(model));
 
-  let loaded: Result<XmlStruct, String> = from_str("<base><item/></base>");
+  let loaded: Result<XmlStruct, String> =
+    from_str("<base><item/></base>").map_err(|e| e.to_string());
   assert_eq!(
     loaded,
     Ok(XmlStruct {
@@ -64,7 +65,7 @@ fn numeric_text_content() {
     content,
     r#"<?xml version="1.0" encoding="UTF-8"?><base unit="ms">42</base>"#
   );
-  assert_eq!(from_str(&content), Ok(model));
+  assert_eq!(from_str(&content).map_err(|e| e.to_string()), Ok(model));
 }
 
 #[test]
@@ -111,7 +112,7 @@ fn struct_attribute_escaping() {
     content,
     r#"<?xml version="1.0" encoding="UTF-8"?><base single="a&lt;b&amp;c" optional="&quot;quoted&quot;" list="x&amp;y z&gt;" />"#
   );
-  assert_eq!(from_str(&content), Ok(model));
+  assert_eq!(from_str(&content).map_err(|e| e.to_string()), Ok(model));
 }
 
 #[test]
@@ -135,5 +136,5 @@ fn multiple_yaserde_attributes() {
     content,
     r#"<?xml version="1.0" encoding="UTF-8"?><base renamed="value" />"#
   );
-  assert_eq!(from_str(&content), Ok(model));
+  assert_eq!(from_str(&content).map_err(|e| e.to_string()), Ok(model));
 }

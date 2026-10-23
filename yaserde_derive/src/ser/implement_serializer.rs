@@ -24,7 +24,7 @@ pub fn implement_serializer(
       fn serialize<W: ::std::io::Write>(
         &self,
         writer: &mut ::yaserde::ser::Serializer<W>,
-      ) -> ::std::result::Result<(), ::std::string::String> {
+      ) -> ::std::result::Result<(), ::yaserde::Error> {
         let skip = writer.skip_start_end();
 
         if !#flatten && !skip {
@@ -56,7 +56,7 @@ pub fn implement_serializer(
               name,
               attributes: ::std::borrow::Cow::Owned(all_attributes),
               namespace: ::std::borrow::Cow::Owned(all_namespaces)
-            }).map_err(|e| e.to_string())?;
+            })?;
           } else {
             unreachable!()
           }
@@ -66,7 +66,7 @@ pub fn implement_serializer(
 
         if !#flatten && !skip {
           let struct_end_event = ::yaserde::__xml::writer::XmlEvent::end_element();
-          writer.write(struct_end_event).map_err(|e| e.to_string())?;
+          writer.write(struct_end_event)?;
         }
 
         ::std::result::Result::Ok(())
@@ -78,7 +78,7 @@ pub fn implement_serializer(
         mut source_namespace: ::yaserde::__xml::namespace::Namespace,
       ) -> ::std::result::Result<
         (::std::vec::Vec<::yaserde::__xml::attribute::OwnedAttribute>, ::yaserde::__xml::namespace::Namespace),
-        ::std::string::String
+        ::yaserde::Error
       > {
         let mut child_attributes = ::std::vec::Vec::<::yaserde::__xml::attribute::OwnedAttribute>::new();
         let mut child_attributes_namespace = ::yaserde::__xml::namespace::Namespace::empty();

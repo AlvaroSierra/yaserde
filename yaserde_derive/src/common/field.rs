@@ -118,8 +118,14 @@ impl YaSerdeField {
     )
   }
 
+  /// Types are checked by `common::validate` before expansion, so parsing cannot fail here.
   pub fn get_type(&self) -> Field {
-    Field::from(&self.syn_field)
+    Field::try_from(&self.syn_field.ty).unwrap_or_else(|error| panic!("{}", error))
+  }
+
+  /// Build an error pointing at this field's type.
+  pub fn unsupported(&self, message: &str) -> syn::Error {
+    syn::Error::new_spanned(&self.syn_field.ty, format!("YaSerDe: {}", message))
   }
 
   pub fn get_span(&self) -> Span {
@@ -232,70 +238,79 @@ impl Field {
   }
 }
 
-impl From<&syn::Path> for Field {
-  fn from(path: &syn::Path) -> Self {
-    let result = if let Some(segment) = path.segments.last() {
-      match segment.ident.to_string().as_str() {
-        "String" => Some(Field::FieldString),
-        "bool" => Some(Field::FieldBool),
-        "i8" => Some(Field::FieldI8),
-        "u8" => Some(Field::FieldU8),
-        "i16" => Some(Field::FieldI16),
-        "u16" => Some(Field::FieldU16),
-        "i32" => Some(Field::FieldI32),
-        "u32" => Some(Field::FieldU32),
-        "i64" => Some(Field::FieldI64),
-        "u64" => Some(Field::FieldU64),
-        "f32" => Some(Field::FieldF32),
-        "f64" => Some(Field::FieldF64),
-        "Option" => Some(Field::FieldOption {
-          data_type: Box::new(Field::from(segment)),
-        }),
-        "Vec" => Some(Field::FieldVec {
-          data_type: Box::new(Field::from(segment)),
-        }),
-        _ => None,
-      }
-    } else {
-      None
+impl TryFrom<&syn::Path> for Field {
+  type Error = syn::Error;
+
+  fn try_from(path: &syn::Path) -> syn::Result<Self> {
+    let Some(segment) = path.segments.last() else {
+      return Err(syn::Error::new_spanned(path, "YaSerDe: empty type path"));
     };
 
-    result.unwrap_or_else(|| Field::FieldStruct {
-      struct_name: path.clone(),
+    Ok(match segment.ident.to_string().as_str() {
+      "String" => Field::FieldString,
+      "bool" => Field::FieldBool,
+      "i8" => Field::FieldI8,
+      "u8" => Field::FieldU8,
+      "i16" => Field::FieldI16,
+      "u16" => Field::FieldU16,
+      "i32" => Field::FieldI32,
+      "u32" => Field::FieldU32,
+      "i64" => Field::FieldI64,
+      "u64" => Field::FieldU64,
+      "f32" => Field::FieldF32,
+      "f64" => Field::FieldF64,
+      "Option" => Field::FieldOption {
+        data_type: Box::new(Field::try_from(segment)?),
+      },
+      "Vec" => Field::FieldVec {
+        data_type: Box::new(Field::try_from(segment)?),
+      },
+      _ => Field::FieldStruct {
+        struct_name: path.clone(),
+      },
     })
   }
 }
 
-impl From<&syn::Field> for Field {
-  fn from(field: &syn::Field) -> Self {
-    let mut ty = &field.ty;
-    while let syn::Type::Group(g) = ty {
-      ty = &g.elem;
+impl TryFrom<&syn::Type> for Field {
+  type Error = syn::Error;
+
+  fn try_from(ty: &syn::Type) -> syn::Result<Self> {
+    let mut inner = ty;
+    while let syn::Type::Group(group) = inner {
+      inner = &group.elem;
     }
-    match ty {
-      Path(path) => Field::from(&path.path),
-      _ => panic!("unable to match {:?}", field.ty),
+    match inner {
+      Path(path) => Field::try_from(&path.path),
+      _ => Err(syn::Error::new_spanned(
+        ty,
+        "YaSerDe does not support this type, only paths like `String`, `Option<T>`, `Vec<T>` or `MyStruct` are supported",
+      )),
     }
   }
 }
 
-impl From<&syn::PathSegment> for Field {
-  fn from(path_segment: &syn::PathSegment) -> Self {
-    if let syn::PathArguments::AngleBracketed(ref args) = path_segment.arguments {
-      match args.args.first() {
-        Some(syn::GenericArgument::Type(Path(path))) => {
-          return Field::from(&path.path);
-        }
-        Some(syn::GenericArgument::Type(syn::Type::Group(syn::TypeGroup { elem, .. }))) => {
-          if let Path(group) = elem.as_ref() {
-            return Field::from(&group.path);
-          }
-        }
-        _ => unimplemented!("unable to match '{:?}'", args.args.first()),
-      }
-    }
+impl TryFrom<&syn::PathSegment> for Field {
+  type Error = syn::Error;
 
-    unimplemented!("unable to match '{}'", quote! {#path_segment})
+  /// Parse the generic argument of `Option<T>` or `Vec<T>`
+  fn try_from(path_segment: &syn::PathSegment) -> syn::Result<Self> {
+    match &path_segment.arguments {
+      syn::PathArguments::AngleBracketed(args) if args.args.len() == 1 => match &args.args[0] {
+        syn::GenericArgument::Type(ty) => Field::try_from(ty),
+        argument => Err(syn::Error::new_spanned(
+          argument,
+          "YaSerDe: expected a type argument",
+        )),
+      },
+      _ => Err(syn::Error::new_spanned(
+        path_segment,
+        format!(
+          "YaSerDe: expected `{}<T>` with a single type argument",
+          path_segment.ident
+        ),
+      )),
+    }
   }
 }
 

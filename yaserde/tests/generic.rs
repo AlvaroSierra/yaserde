@@ -36,6 +36,7 @@ fn generic() {
   serialize_and_validate!(model, content);
 
   log::debug!("deserialize_and_validate @ {}:{}", file!(), line!());
-  let loaded: Result<Base<Generic>, String> = yaserde::de::from_str(content);
+  let loaded: Result<Base<Generic>, String> =
+    yaserde::de::from_str(content).map_err(|e| e.to_string());
   assert_eq!(loaded, Ok(model));
 }

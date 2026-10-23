@@ -102,29 +102,29 @@ use std::io::{Read, Write};
 use xml::writer::XmlEvent;
 
 pub mod de;
+mod error;
 pub mod primitives;
 pub mod ser;
 
+pub use error::{Error, Result};
+
 /// A **data structure** that can be deserialized from any data format supported by YaSerDe.
 pub trait YaDeserialize: Sized {
-  fn deserialize<R: Read>(reader: &mut de::Deserializer<R>) -> Result<Self, String>;
+  fn deserialize<R: Read>(reader: &mut de::Deserializer<R>) -> Result<Self>;
 }
 
 /// A **data structure** that can be serialized into any data format supported by YaSerDe.
 pub trait YaSerialize: Sized {
-  fn serialize<W: Write>(&self, writer: &mut ser::Serializer<W>) -> Result<(), String>;
+  fn serialize<W: Write>(&self, writer: &mut ser::Serializer<W>) -> Result<()>;
 
   fn serialize_attributes(
     &self,
     attributes: Vec<xml::attribute::OwnedAttribute>,
     namespace: xml::namespace::Namespace,
-  ) -> Result<
-    (
-      Vec<xml::attribute::OwnedAttribute>,
-      xml::namespace::Namespace,
-    ),
-    String,
-  >;
+  ) -> Result<(
+    Vec<xml::attribute::OwnedAttribute>,
+    xml::namespace::Namespace,
+  )>;
 }
 
 /// A **visitor** that can be implemented to retrieve information from source file.
@@ -132,62 +132,62 @@ pub trait Visitor<'de>: Sized {
   /// The value produced by this visitor.
   type Value;
 
-  fn visit_bool(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected bool {:?}", v))
+  fn visit_bool(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected bool {:?}", v)))
   }
 
-  fn visit_i8(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected i8 {:?}", v))
+  fn visit_i8(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected i8 {:?}", v)))
   }
 
-  fn visit_u8(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected u8 {:?}", v))
+  fn visit_u8(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected u8 {:?}", v)))
   }
 
-  fn visit_i16(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected i16 {:?}", v))
+  fn visit_i16(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected i16 {:?}", v)))
   }
 
-  fn visit_u16(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected u16 {:?}", v))
+  fn visit_u16(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected u16 {:?}", v)))
   }
 
-  fn visit_i32(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected i32 {:?}", v))
+  fn visit_i32(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected i32 {:?}", v)))
   }
 
-  fn visit_u32(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected u32 {:?}", v))
+  fn visit_u32(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected u32 {:?}", v)))
   }
 
-  fn visit_i64(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected i64 {:?}", v))
+  fn visit_i64(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected i64 {:?}", v)))
   }
 
-  fn visit_u64(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected u64 {:?}", v))
+  fn visit_u64(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected u64 {:?}", v)))
   }
 
-  fn visit_f32(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected f32 {:?}", v))
+  fn visit_f32(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected f32 {:?}", v)))
   }
 
-  fn visit_f64(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected f64 {:?}", v))
+  fn visit_f64(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected f64 {:?}", v)))
   }
 
-  fn visit_str(self, v: &str) -> Result<Self::Value, String> {
-    Err(format!("Unexpected str {:?}", v))
+  fn visit_str(self, v: &str) -> Result<Self::Value> {
+    Err(Error::custom(format!("Unexpected str {:?}", v)))
   }
 }
 
 macro_rules! serialize_type {
   ($type:ty) => {
     impl YaSerialize for $type {
-      fn serialize<W: Write>(&self, writer: &mut ser::Serializer<W>) -> Result<(), String> {
+      fn serialize<W: Write>(&self, writer: &mut ser::Serializer<W>) -> Result<()> {
         let content = format!("{}", self);
         let event = XmlEvent::characters(&content);
-        let _ret = writer.write(event);
+        writer.write(event)?;
         Ok(())
       }
 
@@ -195,13 +195,10 @@ macro_rules! serialize_type {
         &self,
         attributes: Vec<xml::attribute::OwnedAttribute>,
         namespace: xml::namespace::Namespace,
-      ) -> Result<
-        (
-          Vec<xml::attribute::OwnedAttribute>,
-          xml::namespace::Namespace,
-        ),
-        String,
-      > {
+      ) -> Result<(
+        Vec<xml::attribute::OwnedAttribute>,
+        xml::namespace::Namespace,
+      )> {
         Ok((attributes, namespace))
       }
     }
@@ -258,7 +255,10 @@ fn default_visitor() {
   macro_rules! test_type {
     ($visitor:tt, $message:expr) => {{
       let t = Test {};
-      assert_eq!(t.$visitor(""), Err($message.to_string()));
+      assert_eq!(
+        t.$visitor("").map_err(|e| e.to_string()),
+        Err($message.to_string())
+      );
     }};
   }
 
@@ -326,7 +326,8 @@ macro_rules! test_for_attribute_type {
 macro_rules! deserialize_and_validate {
   ($content: expr, $model: expr, $struct: tt) => {
     log::debug!("deserialize_and_validate @ {}:{}", file!(), line!());
-    let loaded: Result<$struct, String> = yaserde::de::from_str($content);
+    let loaded: Result<$struct, String> =
+      yaserde::de::from_str($content).map_err(|e: yaserde::Error| e.to_string());
     assert_eq!(loaded, Ok($model));
   };
 }
@@ -336,7 +337,8 @@ macro_rules! deserialize_and_validate {
 macro_rules! serialize_and_validate {
   ($model: expr, $content: expr) => {
     log::debug!("serialize_and_validate @ {}:{}", file!(), line!());
-    let data: Result<String, String> = yaserde::ser::to_string(&$model);
+    let data: Result<String, String> =
+      yaserde::ser::to_string(&$model).map_err(|e: yaserde::Error| e.to_string());
 
     let content = &format!(r#"<?xml version="1.0" encoding="UTF-8"?>{}"#, $content);
     assert_eq!(
