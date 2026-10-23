@@ -5,8 +5,8 @@ authors = ["Marc-Antoine Arnaud <arnaud.marcantoine@gmail.com>"]
 description = "Serialization and deserialization macros"
 keywords = ["Serialization", "Deserialization"]
 license = "MIT"
-repository = "https://github.com/media-io/yaserde"
-homepage = "https://github.com/media-io/yaserde"
+repository = "https://github.com/luminvent/yaserde"
+homepage = "https://github.com/luminvent/yaserde"
 documentation = "https://docs.rs/yaserde"
 readme = "../README.md"
 edition.workspace = true
@@ -23,6 +23,3 @@ log = "0.4"
 
 [lib]
 proc-macro = true
-
-[badges]
-travis-ci = { repository = "media-io/yaserde" }
